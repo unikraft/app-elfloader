@@ -1,0 +1,3 @@
+$(eval $(call addlib,appelfloader))
+
+APPELFLOADER_SRCS-y += $(APPLINUXABI_BASE)/main.c

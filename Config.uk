@@ -1,0 +1,7 @@
+### Invisible option for dependencies
+config APPELFLOADER_DEPENDENCIES
+	bool
+	default y
+	select LIBNOLIBC if !HAVE_LIBC
+
+### App configuration
