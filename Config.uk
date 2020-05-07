@@ -27,6 +27,10 @@ menu "System call implementations"
 	depends on ARCH_X86_64 && !PLAT_LINUXU
 	default y
 	select LIBUKALLOC
+
+	config APPELFLOADER_EXIT
+	bool "exit, exit_group"
+	default y
 endmenu
 
 config APPELFLOADER_BUILTIN
