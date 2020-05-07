@@ -3,3 +3,6 @@ uk_syscall_e_brk
 uk_syscall_r_brk
 brk
 sbrk
+uk_syscall_e_arch_prctl
+uk_syscall_r_arch_prctl
+arch_prctl

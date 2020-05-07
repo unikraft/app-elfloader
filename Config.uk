@@ -21,6 +21,12 @@ menu "System call implementations"
 	depends on APPELFLOADER_BRK
 	help
 		<n> * 4K; 256 = 1MB, 512 = 2MB, 1024 = 4MB, ...
+
+	config APPELFLOADER_ARCH_PRCTL
+	bool "arch_prctl"
+	depends on ARCH_X86_64 && !PLAT_LINUXU
+	default y
+	select LIBUKALLOC
 endmenu
 
 config APPELFLOADER_BUILTIN
