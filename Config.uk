@@ -3,5 +3,12 @@ config APPELFLOADER_DEPENDENCIES
 	bool
 	default y
 	select LIBNOLIBC if !HAVE_LIBC
+	select LIBELF
+	select LIBLINUXSYSE
+	select LIBSYSCALL_SHIM
+	select LIBSYSCALL_SHIM_HANDLER
 
 ### App configuration
+config APPELFLOADER_DEBUG
+       bool "Enable debug messages"
+       default n
