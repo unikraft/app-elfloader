@@ -9,6 +9,10 @@ config APPELFLOADER_DEPENDENCIES
 	select LIBSYSCALL_SHIM_HANDLER
 
 ### App configuration
+config APPELFLOADER_BUILTIN
+       bool "Built-in hello world test image"
+       default n
+
 config APPELFLOADER_DEBUG
        bool "Enable debug messages"
        default n

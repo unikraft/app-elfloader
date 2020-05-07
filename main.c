@@ -7,6 +7,10 @@
 
 #include "binfmt_elf.h"
 
+#ifdef CONFIG_APPELFLOADER_BUILTIN
+#include "elf_helloworld.h"
+#endif
+
 /*
  * Init libelf
  */
@@ -15,6 +19,35 @@ static __constructor void _libelf_init(void) {
 		UK_CRASH("Failed to initialize libelf: Version error");
 }
 
+#ifdef CONFIG_APPELFLOADER_BUILTIN
+int main(int argc, char *argv[])
+{
+	struct elf_prog *prog;
+	int ret = 0;
+
+	/*
+	 * Parse image
+	 */
+	uk_pr_debug("Load built-in helloworld program image...\n");
+
+	prog = load_elf(uk_alloc_get_default(), elf_helloworld, elf_helloworld_len, "helloworld");
+	if (!prog) {
+		ret = -errno;
+		goto out;
+	}
+
+	/*
+	 * Execute program
+	 */
+	uk_pr_debug("Execute image...\n");
+	exec_elf(prog, argc, argv, NULL, 0xFEED, 0xC0FFEE);
+	/* If we return here, the execution failed! :'( */
+	ret = -EFAULT;
+
+out:
+	return ret;
+}
+#else
 int main(int argc, char *argv[])
 {
 	struct ukplat_memregion_desc img;
@@ -65,3 +98,4 @@ int main(int argc, char *argv[])
 out:
 	return ret;
 }
+#endif /* CONFIG_APPELFLOADER_BUILTIN */
