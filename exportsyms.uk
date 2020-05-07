@@ -1,1 +1,5 @@
 main
+uk_syscall_e_brk
+uk_syscall_r_brk
+brk
+sbrk

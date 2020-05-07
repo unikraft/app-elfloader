@@ -9,6 +9,20 @@ config APPELFLOADER_DEPENDENCIES
 	select LIBSYSCALL_SHIM_HANDLER
 
 ### App configuration
+menu "System call implementations"
+	config APPELFLOADER_BRK
+	bool "brk, sbrk"
+	default y
+	select LIBUKALLOC
+
+	config APPELFLOADER_BRK_NBPAGES
+	int "Reserved heap size for application (number of pages)"
+	default 512
+	depends on APPELFLOADER_BRK
+	help
+		<n> * 4K; 256 = 1MB, 512 = 2MB, 1024 = 4MB, ...
+endmenu
+
 config APPELFLOADER_BUILTIN
        bool "Built-in hello world test image"
        default n
