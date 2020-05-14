@@ -15,3 +15,11 @@ UK_PROVIDED_SYSCALLS-$(CONFIG_APPELFLOADER_ARCH_PRCTL) += arch_prctl-3
 APPELFLOADER_SRCS-$(CONFIG_APPELFLOADER_EXIT) += $(APPELFLOADER_BASE)/exit.c
 UK_PROVIDED_SYSCALLS-$(CONFIG_APPELFLOADER_EXIT) += exit-1 exit_group-1
 COMPFLAGS-$(CONFIG_APPELFLOADER_EXIT) += -fno-builtin-exit -fno-builtin-exit-group
+
+# non-standard extra syscall (needs a patched syscall.h.in in Unikraft base)
+APPELFLOADER_SRCS-$(CONFIG_APPELFLOADER_GETTSC) += $(APPELFLOADER_BASE)/gettsc.c
+UK_PROVIDED_SYSCALLS-$(CONFIG_APPELFLOADER_GETTSC) += gettsc-0
+
+# non-standard extra syscall (needs a patched syscall.h.in in Unikraft base)
+APPELFLOADER_SRCS-$(CONFIG_APPELFLOADER_NOOP) += $(APPELFLOADER_BASE)/noop.c
+UK_PROVIDED_SYSCALLS-$(CONFIG_APPELFLOADER_NOOP) += noop-0

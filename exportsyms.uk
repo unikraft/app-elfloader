@@ -12,3 +12,9 @@ exit
 uk_syscall_e_exit_group
 uk_syscall_r_exit_group
 exit_group
+uk_syscall_e_gettsc
+uk_syscall_r_gettsc
+gettsc
+uk_syscall_e_noop
+uk_syscall_r_noop
+noop
