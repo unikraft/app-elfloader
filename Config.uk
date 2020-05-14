@@ -30,14 +30,6 @@ menu "System call implementations"
 	config APPELFLOADER_EXIT
 	bool "exit, exit_group"
 	default y
-
-	config APPELFLOADER_GETTSC
-	bool "gettsc (experimental)"
-	default n
-
-	config APPELFLOADER_NOOP
-	bool "noop (experimental)"
-	default n
 endmenu
 
 config APPELFLOADER_BUILTIN
