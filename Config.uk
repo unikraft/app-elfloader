@@ -1,0 +1,50 @@
+### Invisible option for dependencies
+config APPELFLOADER_DEPENDENCIES
+	bool
+	default y
+	select LIBNOLIBC if !HAVE_LIBC
+	select LIBELF
+	select LIBLINUXSYSE
+	select LIBSYSCALL_SHIM
+	select LIBSYSCALL_SHIM_HANDLER
+
+### App configuration
+menu "System call implementations"
+	config APPELFLOADER_BRK
+	bool "brk, sbrk"
+	default y
+	select LIBUKALLOC
+
+	config APPELFLOADER_BRK_NBPAGES
+	int "Reserved heap size for application (number of pages)"
+	default 512
+	depends on APPELFLOADER_BRK
+	help
+		<n> * 4K; 256 = 1MB, 512 = 2MB, 1024 = 4MB, ...
+
+	config APPELFLOADER_ARCH_PRCTL
+	bool "arch_prctl"
+	depends on ARCH_X86_64 && !PLAT_LINUXU
+	default y
+	select LIBUKALLOC
+
+	config APPELFLOADER_EXIT
+	bool "exit, exit_group"
+	default y
+
+	config APPELFLOADER_GETTSC
+	bool "gettsc (experimental)"
+	default n
+
+	config APPELFLOADER_NOOP
+	bool "noop (experimental)"
+	default n
+endmenu
+
+config APPELFLOADER_BUILTIN
+       bool "Built-in hello world test image"
+       default n
+
+config APPELFLOADER_DEBUG
+       bool "Enable debug messages"
+       default n
