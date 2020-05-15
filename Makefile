@@ -1,4 +1,5 @@
 WITH_ZYDIS      ?= y
+WITH_LWIP       ?= y
 
 UK_ROOT  ?= $(PWD)/../../unikraft
 UK_LIBS  ?= $(PWD)/../../libs
@@ -6,6 +7,7 @@ UK_PLATS ?= $(PWD)/../../plats
 
 LIBS-y                  := $(UK_LIBS)/libelf
 LIBS-$(WITH_ZYDIS)      := $(LIBS-y):$(UK_LIBS)/zydis
+LIBS-$(WITH_LWIP)       := $(LIBS-y):$(UK_LIBS)/lwip
 PLATS-y                 :=
 
 all:
