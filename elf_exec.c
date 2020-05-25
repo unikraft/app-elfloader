@@ -166,6 +166,7 @@ void exec_elf(struct elf_prog *prog,
 	 */
 
 	/* enter program */
+	uk_pr_debug("Jump to program entry point at %p...\n", (void *) prog->entry);
 	prog_entry(prog->entry);
 
 	UK_CRASH("%s: Execution failed!\n", argv[0]);
