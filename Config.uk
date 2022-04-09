@@ -29,10 +29,6 @@ menu "System call implementations"
 	select LIBUKALLOC
 endmenu
 
-config APPELFLOADER_BUILTIN
-       bool "Built-in hello world test image"
-       default n
-
 config APPELFLOADER_DEBUG
        bool "Enable debug messages"
        default n
