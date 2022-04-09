@@ -7,6 +7,8 @@ config APPELFLOADER_DEPENDENCIES
 	select LIBLINUXSYSE
 	select LIBSYSCALL_SHIM
 	select LIBSYSCALL_SHIM_HANDLER
+	select LIBPOSIX_PROCESS
+	select LIBPOSIX_PROCESS_PIDS
 
 ### App configuration
 menu "System call implementations"

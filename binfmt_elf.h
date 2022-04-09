@@ -29,8 +29,8 @@ struct elf_prog *load_elf(struct uk_alloc *a, void *img_base, size_t img_len,
  * Starts execution of *prog previosuly loaded by `load_elf()`
  * ///@return On success, the function does not return
  */
-void exec_elf(struct elf_prog *prog,
-	      int argc, char *argv[], char *environ[],
-	      uint64_t rnd0, uint64_t rnd1) __noreturn;
+void prepare_ctx_elf(struct ukarch_ctx *ctx, struct elf_prog *prog,
+		     int argc, char *argv[], char *environ[],
+		     uint64_t *rand[2]);
 
 #endif /* BINFMT_ELF_H */
