@@ -49,10 +49,10 @@
 #include <uk/arch/limits.h>
 
 #include "libelf_helper.h"
-#include "binfmt_elf.h"
+#include "elf_prog.h"
 
-struct elf_prog *load_elf(struct uk_alloc *a, void *img_base, size_t img_len,
-			  const char *progname)
+struct elf_prog *elf_load_img(struct uk_alloc *a, void *img_base,
+			      size_t img_len)
 {
 	struct elf_prog *elf_prog = NULL;
 	Elf *elf;
@@ -64,15 +64,15 @@ struct elf_prog *load_elf(struct uk_alloc *a, void *img_base, size_t img_len,
 
 	elf = elf_memory(img_base, img_len);
 	if (!elf) {
-		elferr_err("%s: Failed to initialize ELF parser\n",
-			   progname);
+		elferr_err("%p: Failed to initialize ELF parser\n",
+			   img_base);
 		errno = EBUSY;
 		goto out;
 	}
 
 	if (elf_kind(elf) != ELF_K_ELF) {
-		uk_pr_err("%s: Image format not recognized or not supported\n",
-			  progname);
+		uk_pr_err("%p: Image format not recognized or not supported\n",
+			  img_base);
 		errno = EINVAL;
 		goto out_free_elf;
 	}
@@ -81,14 +81,14 @@ struct elf_prog *load_elf(struct uk_alloc *a, void *img_base, size_t img_len,
 	 * Executable Header
 	 */
 	if (gelf_getehdr(elf, &ehdr) == NULL) {
-		elferr_err("%s: Failed to get executable header",
-			   progname);
+		elferr_err("%p: Failed to get executable header",
+			   img_base);
 		errno = EINVAL;
 		goto out_free_elf;
 	}
 	/* Check machine */
-	uk_pr_debug("%s: ELF machine type: %"PRIu16"\n",
-		    progname, ehdr.e_machine);
+	uk_pr_debug("%p: ELF machine type: %"PRIu16"\n",
+		    img_base, ehdr.e_machine);
 	if
 #if CONFIG_ARCH_X86_64
 	(ehdr.e_machine != EM_X86_64)
@@ -98,16 +98,16 @@ struct elf_prog *load_elf(struct uk_alloc *a, void *img_base, size_t img_len,
 #error "Unsupported machine type"
 #endif
 	{
-		uk_pr_err("%s: ELF machine type mismatch!\n", progname);
+		uk_pr_err("%p: ELF machine type mismatch!\n", img_base);
 		errno = EINVAL;
 		goto out_free_elf;
 	}
 	/* Check ABI */
-	uk_pr_debug("%s: ELF OS ABI: %"PRIu8"\n",
-		    progname, ehdr.e_ident[EI_OSABI]);
+	uk_pr_debug("%p: ELF OS ABI: %"PRIu8"\n",
+		    img_base, ehdr.e_ident[EI_OSABI]);
 	if (ehdr.e_ident[EI_OSABI] != ELFOSABI_LINUX
 	    && ehdr.e_ident[EI_OSABI] != ELFOSABI_NONE) {
-		uk_pr_err("%s: ELF OS ABI unsupported!\n", progname);
+		uk_pr_err("%p: ELF OS ABI unsupported!\n", img_base);
 		errno = EINVAL;
 		goto out_free_elf;
 	}
@@ -115,11 +115,11 @@ struct elf_prog *load_elf(struct uk_alloc *a, void *img_base, size_t img_len,
 	/* We support only static postiion-independent binaries for now:
 	 * https://www.openwall.com/lists/musl/2015/06/01/12
 	 * These binaries are type ET_DYN without having a PT_INTERP section */
-	uk_pr_debug("%s: ELF object type: %"PRIu16"\n",
-		    progname, ehdr.e_type);
+	uk_pr_debug("%p: ELF object type: %"PRIu16"\n",
+		    img_base, ehdr.e_type);
 	if (ehdr.e_type != ET_DYN) {
-		uk_pr_err("%s: ELF executable is not position-independent!\n",
-			  progname);
+		uk_pr_err("%p: ELF executable is not position-independent!\n",
+			  img_base);
 		errno = EINVAL;
 		goto out_free_elf;
 	}
@@ -131,8 +131,8 @@ struct elf_prog *load_elf(struct uk_alloc *a, void *img_base, size_t img_len,
 	 * section; otherwise we need to support dynamic loading.
 	 * For this purpose we need to scan the phdrs */
 	if (elf_getphnum(elf, &phnum) == 0) {
-		elferr_err("%s: Failed to get number of program headers",
-			   progname);
+		elferr_err("%p: Failed to get number of program headers",
+			   img_base);
 		errno = EINVAL;
 		goto out_free_elf;
 	}
@@ -144,8 +144,8 @@ struct elf_prog *load_elf(struct uk_alloc *a, void *img_base, size_t img_len,
 	prog_upperl = 0;
 	for (phi = 0; phi < phnum; ++phi) {
 		if (gelf_getphdr(elf, phi, &phdr) != &phdr) {
-			elferr_warn("%s: Failed to get program header %"PRIu64"\n",
-				    progname, (uint64_t) phi);
+			elferr_warn("%p: Failed to get program header %"PRIu64"\n",
+				    img_base, (uint64_t) phi);
 			continue;
 		}
 
@@ -153,8 +153,8 @@ struct elf_prog *load_elf(struct uk_alloc *a, void *img_base, size_t img_len,
 			/* TODO: If our executable requests an interpreter
 			 *       (e.g., dynamic loader) we have to stop since
 			 *        we do not support it yet */
-			uk_pr_err("%s: ELF executable requested program interpreter: Currently unsupported!\n",
-				  progname);
+			uk_pr_err("%p: ELF executable requested program interpreter: Currently unsupported!\n",
+				  img_base);
 			errno = ENOTSUP;
 			goto out_free_elf;
 		}
@@ -165,8 +165,8 @@ struct elf_prog *load_elf(struct uk_alloc *a, void *img_base, size_t img_len,
 			continue;
 		}
 
-		uk_pr_debug("%s: phdr[%"PRIu64"]: %c%c%c, offset: %p, vaddr: %p, paddr: %p, filesz: %"PRIu64" B, memsz %"PRIu64" B, align: %"PRIu64" B\n",
-			    progname, phi,
+		uk_pr_debug("%p: phdr[%"PRIu64"]: %c%c%c, offset: %p, vaddr: %p, paddr: %p, filesz: %"PRIu64" B, memsz %"PRIu64" B, align: %"PRIu64" B\n",
+			    img_base, phi,
 			    phdr.p_flags & PF_R ? 'R' : '-',
 			    phdr.p_flags & PF_W ? 'W' : '-',
 			    phdr.p_flags & PF_X ? 'X' : '-',
@@ -176,8 +176,8 @@ struct elf_prog *load_elf(struct uk_alloc *a, void *img_base, size_t img_len,
 			    (uint64_t) phdr.p_filesz,
 			    (uint64_t) phdr.p_memsz,
 			    (uint64_t) phdr.p_align);
-		uk_pr_debug("%s: \\_ segment at pie + 0x%"PRIx64" (len: 0x%"PRIx64") from file @  0x%"PRIx64" (len: 0x%"PRIx64")\n",
-			    progname, phdr.p_paddr, phdr.p_memsz,
+		uk_pr_debug("%p: \\_ segment at pie + 0x%"PRIx64" (len: 0x%"PRIx64") from file @  0x%"PRIx64" (len: 0x%"PRIx64")\n",
+			    img_base, phdr.p_paddr, phdr.p_memsz,
 			    (uint64_t) phdr.p_offset, (uint64_t) phdr.p_filesz);
 
 		if (prog_lowerl == 0 && prog_upperl == 0) {
@@ -193,8 +193,8 @@ struct elf_prog *load_elf(struct uk_alloc *a, void *img_base, size_t img_len,
 		}
 		UK_ASSERT(prog_lowerl <= prog_upperl);
 
-		uk_pr_debug("%s: \\_ base: pie + 0x%"PRIx64" (len: 0x%"PRIx64")\n",
-			    progname, prog_lowerl, prog_upperl - prog_lowerl);
+		uk_pr_debug("%p: \\_ base: pie + 0x%"PRIx64" (len: 0x%"PRIx64")\n",
+			    img_base, prog_lowerl, prog_upperl - prog_lowerl);
 	}
 
 	/*
@@ -215,14 +215,14 @@ struct elf_prog *load_elf(struct uk_alloc *a, void *img_base, size_t img_len,
 	elf_prog->img = uk_memalign(elf_prog->a, __PAGE_SIZE,
 				    elf_prog->img_len);
 	if (!elf_prog->img) {
-		uk_pr_debug("%s: Not enough memory to load image (failed to allocate %"PRIu64" bytes)\n",
-			    progname, (uint64_t) elf_prog->img_len);
+		uk_pr_debug("%p: Not enough memory to load image (failed to allocate %"PRIu64" bytes)\n",
+			    img_base, (uint64_t) elf_prog->img_len);
 		uk_free(elf_prog->a, elf_prog);
 		goto out_free_elf;
 	}
 
-	uk_pr_debug("%s: Program/Library memory region: 0x%"PRIx64"-0x%"PRIx64"\n",
-		    progname,
+	uk_pr_debug("%p: Program/Library memory region: 0x%"PRIx64"-0x%"PRIx64"\n",
+		    img_base,
 		    (uint64_t) elf_prog->img,
 		    (uint64_t) elf_prog->img + elf_prog->img_len);
 
@@ -238,22 +238,27 @@ struct elf_prog *load_elf(struct uk_alloc *a, void *img_base, size_t img_len,
 		}
 
 
-		if(!elf_prog->start || (phdr.p_paddr + (uintptr_t) elf_prog->img < elf_prog->start))
-			elf_prog->start = phdr.p_paddr + (uintptr_t) elf_prog->img;
+		if (!elf_prog->start || (phdr.p_paddr
+				+ (uintptr_t) elf_prog->img < elf_prog->start))
+			elf_prog->start = phdr.p_paddr
+					  + (uintptr_t) elf_prog->img;
 
-		uk_pr_debug("%s: Copying 0x%"PRIx64" - 0x%"PRIx64" -> 0x%"PRIx64" - 0x%"PRIx64"\n",
-			    progname,
+		uk_pr_debug("%p: Copying 0x%"PRIx64" - 0x%"PRIx64" -> 0x%"PRIx64" - 0x%"PRIx64"\n",
+			    img_base,
 			    (uint64_t) img_base + phdr.p_offset,
 			    (uint64_t) img_base + phdr.p_offset + phdr.p_filesz,
 			    (uint64_t) elf_prog->img + phdr.p_paddr,
-			    (uint64_t) elf_prog->img + phdr.p_paddr + phdr.p_filesz);
+			    (uint64_t) elf_prog->img + phdr.p_paddr
+			     + phdr.p_filesz);
 		memcpy((void *) elf_prog->img + phdr.p_paddr,
 		       (const void *)((uintptr_t) img_base + phdr.p_offset),
 		       (size_t) phdr.p_filesz);
-		uk_pr_debug("%s: Zeroing 0x%"PRIx64" - 0x%"PRIx64"\n",
-			    progname,
-			    (uint64_t) (elf_prog->img + phdr.p_paddr + phdr.p_filesz),
-			    (uint64_t) (elf_prog->img + phdr.p_paddr + phdr.p_filesz + (phdr.p_memsz - phdr.p_filesz)));
+		uk_pr_debug("%p: Zeroing 0x%"PRIx64" - 0x%"PRIx64"\n",
+			    img_base,
+			    (uint64_t) (elf_prog->img + phdr.p_paddr
+			     + phdr.p_filesz),
+			    (uint64_t) (elf_prog->img + phdr.p_paddr
+			     + phdr.p_filesz + (phdr.p_memsz - phdr.p_filesz)));
 		memset((void *)(elf_prog->img + phdr.p_paddr + phdr.p_filesz),
 		       0, phdr.p_memsz - phdr.p_filesz);
 

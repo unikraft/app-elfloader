@@ -31,13 +31,14 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef BINFMT_ELF_H
-#define BINFMT_ELF_H
+#ifndef ELF_PROG_H
+#define ELF_PROG_H
 
 #include <stdint.h>
 #include <inttypes.h>
 #include <stddef.h>
 #include <uk/alloc.h>
+#include <uk/arch/ctx.h>
 #include <uk/essentials.h>
 
 struct elf_prog {
@@ -53,17 +54,47 @@ struct elf_prog {
 };
 
 /**
- * @return 0 on success, *out is filled out
+ * Load an ELF program from a memory region. After loading,
+ * the source image can be released.
+ *
+ * @param a:
+ *   Reference to allocator for allocating space for program sections
+ * @param img_base:
+ *   Reference to ELF image in memory
+ * @param img_len:
+ *   Length of ELF image in memory
+ * @return:
+ *   On success an elf_prog instance is returned. Such a program
+ *   can be prepared to be started with elf_ctx_init(). On errors,
+ *   NULL is returned and `errno` is set accordingly.
  */
-struct elf_prog *load_elf(struct uk_alloc *a, void *img_base, size_t img_len,
-			  const char *progname);
+struct elf_prog *elf_load_img(struct uk_alloc *a, void *img_base,
+			      size_t img_len);
 
 /**
- * Starts execution of *prog previosuly loaded by `load_elf()`
- * ///@return On success, the function does not return
+ * Initializes an ukarch_ctx with a loaded ELF program. This program
+ * will be executed as soon as the context is scheduled/loaded to
+ * the CPU. The function will populate the associated stack with
+ * auxiliary vector, environment variables, and program arguments.
+ *
+ * @param ctx:
+ *   uakrch_ctx to initialize, an associated stack is required
+ * @param prog:
+ *   Loaded ELF program (e.g., `elf_load_img()`)
+ * @param argc:
+ *   Argument count
+ * @param argv:
+ *   Argument vector
+ *   NOTE: This function will copy the content of argv to the application stack
+ * @param environ:
+ *   NULL-terminated list of environment variables
+ *   NOTE: This function will copy the content of environ to the application
+ *         stack
+ * @param rand:
+ *   Random seed that is passed to the application
  */
-void exec_elf(struct elf_prog *prog,
-	      int argc, char *argv[], char *environ[],
-	      uint64_t rnd0, uint64_t rnd1) __noreturn;
+void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
+		  int argc, char *argv[], char *environ[],
+		  uint64_t rand[2]);
 
-#endif /* BINFMT_ELF_H */
+#endif /* ELF_PROG_H */

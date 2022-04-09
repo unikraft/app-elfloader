@@ -31,14 +31,20 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <uk/config.h>
 #include <libelf.h>
 #include <stdio.h>
 #include <string.h>
-#include <stdbool.h>
+#include <unistd.h>
 #include <uk/essentials.h>
 #include <uk/plat/memory.h>
+#if CONFIG_LIBPOSIX_PROCESS
+#include <uk/process.h>
+#endif /* CONFIG_LIBPOSIX_PROCESS */
+#include <uk/thread.h>
+#include <uk/sched.h>
 
-#include "binfmt_elf.h"
+#include "elf_prog.h"
 
 /*
  * Init libelf
@@ -50,8 +56,10 @@ static __constructor void _libelf_init(void) {
 
 int main(int argc, char *argv[])
 {
-	struct ukplat_memregion_desc img;
+	struct ukplat_memregion_desc *img;
 	struct elf_prog *prog;
+	struct uk_thread *app_thread;
+	uint64_t rand[2] = { 0xB0B0, 0xF00D }; /* FIXME: Use real random val */
 	int rc;
 	int ret = 0;
 
@@ -69,32 +77,74 @@ int main(int argc, char *argv[])
 	 */
 	uk_pr_debug("Searching for image...\n");
 	rc = ukplat_memregion_find_initrd0(&img);
-	if (rc < 0 || !img.base || !img.len) {
+	if (rc < 0 || !img->vbase || !img->len) {
 		uk_pr_err("No image found (initrd parameter missing?)\n");
 		ret = 1;
 		goto out;
 	}
 	uk_pr_info("Image at %p, len %"__PRIsz" bytes\n",
-		   img.base, img.len);
+		   (void *) img->vbase, img->len);
+
+	/*
+	 * Create thread container
+	 * It will have a new stack and an ukarch_ctx
+	 */
+	app_thread = uk_thread_create_container(uk_alloc_get_default(),
+						uk_alloc_get_default(), 0,
+						uk_alloc_get_default(),
+						false,
+						"elfapp",
+						NULL, NULL);
+	if (!app_thread) {
+		uk_pr_err("Failed to allocate thread container\n");
+		ret = 1;
+		goto out;
+	}
 
 	/*
 	 * Parse image
 	 */
 	uk_pr_debug("Load image...\n");
-	prog = load_elf(uk_alloc_get_default(), img.base, img.len, argv[0]);
+	prog = elf_load_img(uk_alloc_get_default(), (void *) img->vbase,
+			    img->len);
 	if (!prog) {
 		ret = -errno;
-		goto out;
+		goto out_free_thread;
 	}
+	uk_pr_info("ELF program loaded to 0x%"PRIx64"-0x%"PRIx64" (%"__PRIsz" B), entry at %p\n",
+		   (uint64_t) prog->img, (uint64_t) prog->img + prog->img_len, prog->img_len,
+		   (void *) prog->entry);
 
 	/*
-	 * Execute program
+	 * Initialize application thread
 	 */
-	uk_pr_debug("Execute image...\n");
-	exec_elf(prog, argc, argv, NULL, 0xFEED, 0xC0FFEE);
+	uk_pr_debug("Prepare application thread...\n");
+	elf_ctx_init(&app_thread->ctx, prog,
+		     argc, argv, NULL, rand);
+	app_thread->flags |= UK_THREADF_RUNNABLE;
+#if CONFIG_LIBPOSIX_PROCESS
+	uk_posix_process_create(uk_alloc_get_default(),
+				app_thread,
+				uk_thread_current());
+#endif
 
-	/* If we return here, the execution failed! :'( */
+	/*
+	 * Execute application
+	 */
+	uk_sched_thread_add(uk_sched_current(), app_thread);
 
+	/*
+	 * FIXME: Instead of an infinite wait, wait for application
+	 *        to exit (this needs thread_wait support with
+	 *        uksched and/or posix-process)
+	 */
+	for (;;)
+		sleep(10);
+
+	/* TODO: As soon as we are able to return: properly exit/shutdown */
+
+out_free_thread:
+	uk_thread_release(app_thread);
 out:
 	return ret;
 }
