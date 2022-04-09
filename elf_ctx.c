@@ -51,7 +51,7 @@
 #include <uk/print.h>
 #include <uk/essentials.h>
 
-#include "binfmt_elf.h"
+#include "elf_prog.h"
 
 /* Fields for auxiliary vector
  * (https://lwn.net/Articles/519085/)
@@ -85,58 +85,37 @@
 
 #if CONFIG_ARCH_X86_64
 	static const char *auxv_platform = "x86_64";
-
-#define push_stack(val)							\
-	do {								\
-		asm volatile("pushq %0" : : "r" ((long long)(val)));	\
-	} while (0)
-
-static inline uintptr_t push_rand16(uint64_t u, uint64_t l)
-{
-	push_stack(u);
-	push_stack(l);
-	return ukarch_read_sp();
-}
-
-#define prog_entry(addr)						\
-	do {								\
-		/* with GlibC, the dynamic linker sets in rdx the address of some code \
-		 * to be executed at exit (if != 0), however we are not using it and \
-		 * here it contains some garbage value, so clear it	\
-		 */							\
-		asm volatile("xor %rdx, %rdx");				\
-		/* finally, jump to entry point */			\
-		asm volatile("jmp *%0" : : "r" ((long long)(addr)));	\
-	} while (0)
 #else
 #error "Unsupported architecture"
 #endif /* CONFIG_ARCH_X86_64 */
 
-#define push_auxv(key, val)			\
-	do {					\
-		push_stack(val);		\
-		push_stack(key);		\
+#define push_auxv(ctx, key, val)				\
+	do {							\
+		ukarch_rctx_stackpush(ctx, (long) val);		\
+		ukarch_rctx_stackpush(ctx, (long) key);		\
 	} while (0)
 
-#include <uk/hexdump.h>
-
-void exec_elf(struct elf_prog *prog,
-	      int argc, char *argv[], char *environ[],
-	      uint64_t rand0, uint64_t rand1)
+void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
+		  int argc, char *argv[], char *environ[],
+		  uint64_t rand[2])
 {
 	int i, envc;
-	void *rnd16 = NULL;
 
 	UK_ASSERT(prog);
 	UK_ASSERT((argc >= 1) && argv);
 
 	uk_pr_debug("%s: image:          0x%"PRIx64" - 0x%"PRIx64"\n", argv[0],
 		    (uint64_t) prog->img, (uint64_t) prog->img + prog->img_len);
-	uk_pr_debug("%s: start:          0x%"PRIx64"\n", argv[0], (uint64_t) prog->start);
-	uk_pr_debug("%s: entry:          0x%"PRIx64"\n", argv[0], (uint64_t) prog->entry);
-	uk_pr_debug("%s: ehdr_phoff:     0x%"PRIx64"\n", argv[0], (uint64_t) prog->ehdr_phoff);
-	uk_pr_debug("%s: ehdr_phnum:     %"PRIu64"\n",   argv[0], (uint64_t) prog->ehdr_phnum);
-	uk_pr_debug("%s: ehdr_phentsize: 0x%"PRIx64"\n", argv[0], (uint64_t) prog->ehdr_phentsize);
+	uk_pr_debug("%s: start:          0x%"PRIx64"\n", argv[0],
+		    (uint64_t) prog->start);
+	uk_pr_debug("%s: entry:          0x%"PRIx64"\n", argv[0],
+		    (uint64_t) prog->entry);
+	uk_pr_debug("%s: ehdr_phoff:     0x%"PRIx64"\n", argv[0],
+		    (uint64_t) prog->ehdr_phoff);
+	uk_pr_debug("%s: ehdr_phnum:     %"PRIu64"\n",   argv[0],
+		    (uint64_t) prog->ehdr_phnum);
+	uk_pr_debug("%s: ehdr_phentsize: 0x%"PRIx64"\n", argv[0],
+		    (uint64_t) prog->ehdr_phentsize);
 
 	/* count the number of environment variables */
 	envc = 0;
@@ -145,71 +124,61 @@ void exec_elf(struct elf_prog *prog,
 			++envc;
 
 	/*
-	 * TODO: Create new stack and push arguments there
+	 * We need to push the element on the stack in the inverse order they
+	 * will be read by the application's C library (i.e. argc in the end)
 	 */
-
-	/* We need to push the element on the stack in the inverse order they
-	 * will be read by the application's C library (i.e. argc in the end) */
-
-	/* Use first 16bytes on stack to push 16-bytes random numbers */
-	rnd16 = (void *) push_rand16(rand0, rand1);
-	uk_pr_debug("%s: rnd16 at %p\n", argv[0], rnd16);
 
 	/*
 	 * Auxiliary vector
 	 */
-	push_auxv(AT_NULL, 0x0);
-	push_auxv(AT_IGNORE, 0x0);
-	push_auxv(AT_EXECFD, 0x0);
-	push_auxv(AT_PHDR, prog->start + prog->ehdr_phoff);
-	push_auxv(AT_PHNUM, prog->ehdr_phnum);
-	push_auxv(AT_PHENT, prog->ehdr_phentsize);
-	push_auxv(AT_RANDOM, rnd16); // pointer to random numbers that we have on the stack
-	push_auxv(AT_BASE, 0x0);
-	push_auxv(AT_SYSINFO_EHDR, 0x0);
-	push_auxv(AT_SYSINFO, 0x0);
-	push_auxv(AT_PAGESZ, 4096);
-	push_auxv(AT_HWCAP, 0x0);
-	push_auxv(AT_CLKTCK, 0x64); // mimic Linux
-	push_auxv(AT_FLAGS, 0x0);
-	push_auxv(AT_ENTRY, prog->entry);
-	push_auxv(AT_UID, 0x0);
-	push_auxv(AT_EUID, 0x0);
-	push_auxv(AT_GID, 0x0);
-	push_auxv(AT_EGID, 0x0);
-	push_auxv(AT_SECURE, 0x0);
-	push_auxv(AT_SYSINFO, 0x0);
-	push_auxv(AT_EXECFN, 0x0);
-	push_auxv(AT_DCACHEBSIZE, 0x0);
-	push_auxv(AT_ICACHEBSIZE, 0x0);
-	push_auxv(AT_UCACHEBSIZE, 0x0);
-	push_auxv(AT_NOTELF, 0x0);
-	push_auxv(AT_PLATFORM, (uintptr_t) auxv_platform);
-
-	/* envp */
-	/* Note that this will push NULL to the stack first, which is expected */
-	push_stack(NULL);
-	if (environ) {
-		for (i=envc-1; i>=0; --i)
-			push_stack(environ[i]);
-	}
-
-	/* argv + argc */
-	/* Same as envp, pushing NULL first */
-	push_stack(NULL);
-	if (argc)
-		for(i=argc-1; i>0; --i)
-			push_stack(argv[i]);
-	push_stack((argc - 1));
+	push_auxv(ctx, AT_NULL, 0x0);
+	push_auxv(ctx, AT_IGNORE, 0x0);
+	push_auxv(ctx, AT_EXECFD, 0x0);
+	push_auxv(ctx, AT_PHDR, prog->start + prog->ehdr_phoff);
+	push_auxv(ctx, AT_PHNUM, prog->ehdr_phnum);
+	push_auxv(ctx, AT_PHENT, prog->ehdr_phentsize);
+	push_auxv(ctx, AT_RANDOM, (uintptr_t) rand);
+	push_auxv(ctx, AT_BASE, 0x0);
+	push_auxv(ctx, AT_SYSINFO_EHDR, 0x0);
+	push_auxv(ctx, AT_SYSINFO, 0x0);
+	push_auxv(ctx, AT_PAGESZ, 4096);
+	push_auxv(ctx, AT_HWCAP, 0x0);
+	push_auxv(ctx, AT_CLKTCK, 0x64); /* Mimic Linux */
+	push_auxv(ctx, AT_FLAGS, 0x0);
+	push_auxv(ctx, AT_ENTRY, prog->entry);
+	push_auxv(ctx, AT_UID, 0x0);
+	push_auxv(ctx, AT_EUID, 0x0);
+	push_auxv(ctx, AT_GID, 0x0);
+	push_auxv(ctx, AT_EGID, 0x0);
+	push_auxv(ctx, AT_SECURE, 0x0);
+	push_auxv(ctx, AT_SYSINFO, 0x0);
+	push_auxv(ctx, AT_EXECFN, 0x0);
+	push_auxv(ctx, AT_DCACHEBSIZE, 0x0);
+	push_auxv(ctx, AT_ICACHEBSIZE, 0x0);
+	push_auxv(ctx, AT_UCACHEBSIZE, 0x0);
+	push_auxv(ctx, AT_NOTELF, 0x0);
+	push_auxv(ctx, AT_PLATFORM, (uintptr_t) auxv_platform);
 
 	/*
-	 * TODO: Enter program with the new stack
+	 * envp
 	 */
+	/* NOTE: As expected, this will push NULL to the stack first */
+	ukarch_rctx_stackpush(ctx, (long) NULL);
+	if (environ) {
+		for (i=envc-1; i>=0; --i)
+			ukarch_rctx_stackpush(ctx, (uintptr_t) environ[i]);
+	}
 
-	/* enter program */
-	uk_pr_debug("Jump to program entry point at %p...\n", (void *) prog->entry);
-	prog_entry(prog->entry);
+	/*
+	 * argv + argc
+	 */
+	/* Same as envp, pushing NULL first */
+	ukarch_rctx_stackpush(ctx, (long) NULL);
+	if (argc)
+		for(i=argc-1; i>0; --i)
+			ukarch_rctx_stackpush(ctx, (uintptr_t) argv[i]);
+	ukarch_rctx_stackpush(ctx, (long) argc - 1);
 
-	UK_CRASH("%s: Execution failed!\n", argv[0]);
-	for(;;);
+	/* ctx will enter the entry point with cleared registers. */
+	ukarch_ctx_init(ctx, ctx->sp, 0x0, prog->entry);
 }

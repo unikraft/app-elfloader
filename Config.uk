@@ -4,9 +4,12 @@ config APPELFLOADER_DEPENDENCIES
 	default y
 	select LIBNOLIBC if !HAVE_LIBC
 	select LIBELF
+	select LIBUKSCHED
 	select LIBSYSCALL_SHIM
 	select LIBSYSCALL_SHIM_HANDLER
-	select LIBPOSIX_PROCESS
+	select LIBPOSIX_TIME
+	imply LIBPOSIX_PROCESS
+	imply LIBPOSIX_PROCESS_PIDS
 
 ### App configuration
 menu "System call implementations"
