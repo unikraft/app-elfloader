@@ -6,6 +6,7 @@ config APPELFLOADER_DEPENDENCIES
 	select LIBELF
 	select LIBSYSCALL_SHIM
 	select LIBSYSCALL_SHIM_HANDLER
+	select LIBPOSIX_PROCESS
 
 ### App configuration
 menu "System call implementations"
@@ -26,10 +27,6 @@ menu "System call implementations"
 	depends on ARCH_X86_64 && !PLAT_LINUXU
 	default y
 	select LIBUKALLOC
-
-	config APPELFLOADER_EXIT
-	bool "exit, exit_group"
-	default y
 endmenu
 
 config APPELFLOADER_BUILTIN
