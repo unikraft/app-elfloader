@@ -27,9 +27,8 @@ menu "System call implementations"
 
 	config APPELFLOADER_ARCH_PRCTL
 	bool "arch_prctl"
-	depends on ARCH_X86_64 && !PLAT_LINUXU
+	depends on ARCH_X86_64
 	default y
-	select LIBUKALLOC
 endmenu
 
 config APPELFLOADER_DEBUG

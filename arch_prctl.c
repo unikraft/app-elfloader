@@ -110,15 +110,8 @@ static inline __uptr readgs(void)
 }
 #endif
 
-/*
- * NOTE: We could not use UK_SYSCALL_*_DEFINE because the libc interface has
- * different number of arguments than the actual system call. In order to mimic
- * this we need to provide all three system call entry functions manually
- * (raw, errno, actual).
- */
-long uk_syscall_r_arch_prctl(long code, long addr, long arg2 __unused)
+UK_LLSYSCALL_R_DEFINE(long, arch_prctl, long, code, long, addr, long, arg2)
 {
-	//uk_pr_debug("arch_prctl(0x%04x,%p,%p)\n", code, addr, arg2);
 	switch(code) {
 		case ARCH_SET_GS:
 			uk_pr_debug("arch_prctl option SET_GS(%p)\n",
@@ -133,61 +126,53 @@ long uk_syscall_r_arch_prctl(long code, long addr, long arg2 __unused)
 			return 0;
 
 		case ARCH_GET_GS: {
-			__uptr gs_val = readgs();
+			uk_pr_debug("arch_prctl option GET_GS(%p)\n",
+				    (void *) addr);
 			if (!addr)
 				return -EINVAL;
-			*((long *) addr) = gs_val;
+			*((long *) addr) = readgs();
 			return 0;
 		}
 
 		case ARCH_GET_FS: {
-			__uptr fs_val = readfs();
+			uk_pr_debug("arch_prctl option GET_FS(%p)\n",
+				    (void *) addr);
 			if (!addr)
 				return -EINVAL;
-			*((long *) addr) = fs_val;
+			*((long *) addr) = readfs();
 			return 0;
 		}
 
 		case ARCH_GET_CPUID:
-			uk_pr_err("arch_prctl option GET_CPUID not implemented\n");
-			return -ENOSYS;
+			uk_pr_warn("arch_prctl option GET_CPUID not implemented\n");
+			return -EINVAL;
 
 		case ARCH_SET_CPUID:
-			uk_pr_err("arch_prctl option SET_CPUID not implemented\n");
-			return -ENOSYS;
+			uk_pr_warn("arch_prctl option SET_CPUID not implemented\n");
+			return -EINVAL;
 
 		case ARCH_MAP_VDSO_X32:
-			uk_pr_err("arch_prctl option MAP_VDSO_X32 not implemented\n");
-			return -ENOSYS;
+			uk_pr_warn("arch_prctl option MAP_VDSO_X32 not implemented\n");
+			return -EINVAL;
 
 		case ARCH_MAP_VDSO_32:
-			uk_pr_err("arch_prctl option MAP_VDSO_32 not implemented\n");
-			return -ENOSYS;
+			uk_pr_warn("arch_prctl option MAP_VDSO_32 not implemented\n");
+			return -EINVAL;
 
 		case ARCH_MAP_VDSO_64:
-			uk_pr_err("arch_prctl option MAP_VDSO_64 not implemented\n");
-			return -ENOSYS;
+			uk_pr_warn("arch_prctl option MAP_VDSO_64 not implemented\n");
+			return -EINVAL;
 		default:
 			break;
 	}
 
-	uk_pr_err("arch_prctl: unknown code 0x%lx\n", code);
+	uk_pr_debug("arch_prctl option code 0x%lx ignored\n", code);
 	return -EINVAL;
 }
 
-long uk_syscall_e_arch_prctl(long code, long addr, long arg2)
-{
-	long ret;
-
-	ret = uk_syscall_r_arch_prctl(code, addr, arg2);
-	if (ret < 0) {
-		errno = (int) -ret;
-		return -1;
-	}
-	return 0;
-}
-
+#if LIBC_SYSCALLS
 int arch_prctl(int code, void *addr)
 {
 	return uk_syscall_e_arch_prctl((long) code, (long) addr, 0x0);
 }
+#endif
