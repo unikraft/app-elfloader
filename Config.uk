@@ -29,14 +29,6 @@ menu "System call implementations"
 	bool "arch_prctl"
 	depends on ARCH_X86_64
 	default y
-
-	config APPELFLOADER_GETTSC
-	bool "gettsc (experimental)"
-	default n
-
-	config APPELFLOADER_NOOP
-	bool "noop (experimental)"
-	default n
 endmenu
 
 config APPELFLOADER_BUILTIN
