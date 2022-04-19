@@ -1,4 +1,4 @@
-/* FROM HERMITUX */
+/* Derived from HermiTux */
 #include <errno.h>
 #include <stddef.h>
 #include <uk/print.h>
@@ -74,7 +74,6 @@ static inline __uptr readgs(void)
 
 UK_LLSYSCALL_R_DEFINE(long, arch_prctl, long, code, long, addr, long, arg2)
 {
-	//uk_pr_debug("arch_prctl(0x%04x,%p,%p)\n", code, addr, arg2);
 	switch(code) {
 		case ARCH_SET_GS:
 			uk_pr_debug("arch_prctl option SET_GS(%p)\n",
