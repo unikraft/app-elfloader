@@ -82,7 +82,7 @@ int main(int argc, char *argv[])
 	 */
 	uk_pr_debug("Prepare main thread...\n");
 	ctx_elf(&main_thread->ctx, prog,
-		argc, argv, NULL, rand);
+		argc, argv, NULL, (uint64_t **)rand);
 	main_thread->flags |= UK_THREADF_RUNNABLE;
 #if CONFIG_LIBPOSIX_PROCESS
 	uk_posix_process_create(uk_alloc_get_default(),
