@@ -2,6 +2,7 @@
 config APPELFLOADER_DEPENDENCIES
 	bool
 	default y
+	select PLAT_KVM
 	select LIBNOLIBC if !HAVE_LIBC
 	select LIBELF
 	select LIBLINUXSYSE
@@ -10,6 +11,17 @@ config APPELFLOADER_DEPENDENCIES
 	select LIBSYSCALL_SHIM_HANDLER_ULTLS
 	select LIBPOSIX_PROCESS
 	select LIBPOSIX_PROCESS_PIDS
+	select LIBVFSCORE
+	select LIBVFSCORE_ROOTFS_9PFS
+	select LIBUKMMAP
+	select LIBPOSIX_SYSINFO
+	select LIBPOSIX_USER
+	select LIBZYDIS
+	select LIBLWIP
+	select LIBUKDEBUG
+	select LIBUKDEBUG_PRINTK
+	select LIBUKDEBUG_PRINTK_INFO
+	select LIBUKDEBUG_PRINTD
 
 ### App configuration
 menu "System call implementations"
