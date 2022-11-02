@@ -47,6 +47,11 @@
 #include <uk/print.h>
 #include <uk/essentials.h>
 #include <uk/arch/limits.h>
+#include <uk/errptr.h>
+#if CONFIG_PAGING
+#include <uk/plat/paging.h>
+#include <uk/arch/limits.h>
+#endif /* CONFIG_PAGING */
 
 #include "libelf_helper.h"
 #include "elf_prog.h"
@@ -54,6 +59,10 @@
 struct elf_prog *elf_load_img(struct uk_alloc *a, void *img_base,
 			      size_t img_len)
 {
+#if CONFIG_PAGING
+	struct uk_pagetable *pt;
+	int ret;
+#endif /* CONFIG_PAGING */
 	struct elf_prog *elf_prog = NULL;
 	Elf *elf;
 	GElf_Ehdr ehdr;
@@ -76,6 +85,15 @@ struct elf_prog *elf_load_img(struct uk_alloc *a, void *img_base,
 		errno = EINVAL;
 		goto out_free_elf;
 	}
+
+#if CONFIG_PAGING
+	pt = ukplat_pt_get_active();
+	if (PTRISERR(pt)) {
+		uk_pr_warn("%p: Unable to set page protections bits. Continuing without...\n",
+			   img_base);
+		pt = NULL;
+	}
+#endif /* CONFIG_PAGING */
 
 	/*
 	 * Executable Header
@@ -262,9 +280,36 @@ struct elf_prog *elf_load_img(struct uk_alloc *a, void *img_base,
 		memset((void *)(elf_prog->img + phdr.p_paddr + phdr.p_filesz),
 		       0, phdr.p_memsz - phdr.p_filesz);
 
+#if CONFIG_PAGING
 		/*
-		 * TODO: Setup memory protection (e.g., ukplat_mprotect())
+		 * Setup memory protection
 		 */
+		if (pt) {
+			uk_pr_debug("%p: Protecting 0x%"PRIx64" - 0x%"PRIx64": %c%c%c\n",
+				    img_base,
+				    ALIGN_DOWN((uint64_t) (elf_prog->img
+						+ phdr.p_paddr), __PAGE_SIZE),
+				    ALIGN_UP((uint64_t) (elf_prog->img
+						+ phdr.p_paddr + phdr.p_memsz),
+						__PAGE_SIZE),
+				    phdr.p_flags & PF_R ? 'R' : '-',
+				    phdr.p_flags & PF_W ? 'W' : '-',
+				    phdr.p_flags & PF_X ? 'X' : '-');
+			ret = ukplat_page_set_attr(pt, ALIGN_DOWN((__vaddr_t)
+				     elf_prog->img + phdr.p_paddr, __PAGE_SIZE),
+				     DIV_ROUND_UP(phdr.p_memsz, __PAGE_SIZE),
+				       ((phdr.p_flags & PF_R)
+				       ? PAGE_ATTR_PROT_READ  : 0x0)
+				     | ((phdr.p_flags & PF_W)
+				       ? PAGE_ATTR_PROT_WRITE : 0x0)
+				     | ((phdr.p_flags & PF_X)
+				       ? PAGE_ATTR_PROT_EXEC  : 0x0),
+				     0);
+			if (ret < 0)
+				uk_pr_err("%p: Failed to set protection bits: %d. Program execution with incoreect bits set may fail and/or is insecure.\n",
+					  img_base, ret);
+		}
+#endif /* CONFIG_PAGING */
 	}
 
 out_free_elf:
