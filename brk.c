@@ -58,7 +58,7 @@ UK_LLSYSCALL_R_DEFINE(void *, brk, void *, addr)
 	if (!addr && base) {
 		/* another brk context request although we have one already */
 		uk_pr_crit("Cannot handle multiple user space heaps: Not implemented!\n");
-		return ERR2PTR(ENOMEM);
+		return ERR2PTR(-ENOMEM);
 	}
 
 	if (!addr) {
@@ -67,7 +67,7 @@ UK_LLSYSCALL_R_DEFINE(void *, brk, void *, addr)
 		if (!base) {
 			uk_pr_crit("Could not allocate memory for heap (%"PRIu64" KiB): Out of memory\n",
 				   (uint64_t) HEAP_LEN / 1024);
-			return ERR2PTR(ENOMEM);
+			return ERR2PTR(-ENOMEM);
 		}
 		zeroed = base;
 		addr = base;
@@ -75,7 +75,7 @@ UK_LLSYSCALL_R_DEFINE(void *, brk, void *, addr)
 
 	if (addr < base || addr >= (base + HEAP_LEN)) {
 		uk_pr_crit("Failed to increase heap: Not implemented!\n");
-		return ERR2PTR(ENOMEM);
+		return ERR2PTR(-ENOMEM);
 	}
 
 	/* Zero out requested memory (e.g., glibc requires) */
