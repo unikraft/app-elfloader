@@ -1,4 +1,4 @@
-WITH_ZYDIS      ?= y
+WITH_ZYDIS      ?= n
 WITH_LWIP       ?= y
 WITH_TLSF       ?= n
 WITH_MUSL       ?= n
