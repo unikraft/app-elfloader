@@ -11,6 +11,10 @@ config APPELFLOADER_DEPENDENCIES
 	select LIBPOSIX_TIME
 	imply LIBPOSIX_PROCESS
 	imply LIBPOSIX_PROCESS_PIDS
+	imply LIBUKMMAP
+	imply LIBVFSCORE
+	imply LIBPOSIX_SYSINFO
+	imply LIBPOSIX_USER
 
 ### App configuration
 menu "System call implementations"
