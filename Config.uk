@@ -16,17 +16,6 @@ config APPELFLOADER_DEPENDENCIES
 	imply LIBPOSIX_SYSINFO
 	imply LIBPOSIX_USER
 
-### App configuration
-config APPELFLOADER_CUSTOMAPPNAME
-bool "Use first command-line argument as application name (argv[0])"
-default n
-help
-	Instead of using the kernel image name as application name,
-	this option enables taking the first argument from the kernel
-	command line as application name. This makes elfloader easier
-	to use with binaries having multiple personalities depending
-	on the given application name.
-
 menu "System call implementations"
 	config APPELFLOADER_BRK
 	bool "brk, sbrk"

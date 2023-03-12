@@ -34,10 +34,8 @@
 #include <uk/config.h>
 #include <libelf.h>
 #include <stdio.h>
-#include <string.h>
 #include <unistd.h>
 #include <uk/essentials.h>
-#include <uk/plat/memory.h>
 #if CONFIG_LIBPOSIX_PROCESS
 #include <uk/process.h>
 #endif /* CONFIG_LIBPOSIX_PROCESS */
@@ -45,6 +43,7 @@
 #include <uk/sched.h>
 
 #include "elf_prog.h"
+#include "img_loader.h"
 
 /*
  * Init libelf
@@ -56,42 +55,31 @@ static __constructor void _libelf_init(void) {
 
 int main(int argc, char *argv[])
 {
-	struct ukplat_memregion_desc *img;
+	void *img;
+	size_t img_len;
 	struct elf_prog *prog;
 	struct uk_thread *app_thread;
 	uint64_t rand[2] = { 0xB0B0, 0xF00D }; /* FIXME: Use real random val */
-	int rc;
 	int ret = 0;
 
 	/*
-	 * Make sure argv[0], argv[1] exists
+	 * Make sure argv[1] exists
 	 */
-#if CONFIG_APPELFLOADER_CUSTOMAPPNAME
 	if (argc <= 1 || !argv) {
 		uk_pr_err("Program name missing (no argv[1])\n");
 		ret = 1;
 		goto out;
 	}
-#else /* !CONFIG_APPELFLOADER_CUSTOMAPPNAME */
-	if (argc <= 0 || !argv) {
-		uk_pr_err("Program name missing (no argv[0])\n");
-		ret = 1;
-		goto out;
-	}
-#endif /* !CONFIG_APPELFLOADER_CUSTOMAPPNAME */
 
 	/*
-	 * Find initrd
+	 * Find ELF image
 	 */
-	uk_pr_debug("Searching for image...\n");
-	rc = ukplat_memregion_find_initrd0(&img);
-	if (rc < 0 || !img->vbase || !img->len) {
-		uk_pr_err("No image found (initrd parameter missing?)\n");
-		ret = 1;
+	img = img_load(argv[1], &img_len);
+	if (!img) {
+		ret = -errno;
 		goto out;
 	}
-	uk_pr_info("Image at %p, len %"__PRIsz" bytes\n",
-		   (void *) img->vbase, img->len);
+	uk_pr_info("Image at %p, len %"__PRIsz" bytes\n", img, img_len);
 
 	/*
 	 * Create thread container
@@ -106,15 +94,14 @@ int main(int argc, char *argv[])
 	if (!app_thread) {
 		uk_pr_err("Failed to allocate thread container\n");
 		ret = 1;
-		goto out;
+		goto out_free_memory;
 	}
 
 	/*
 	 * Parse image
 	 */
 	uk_pr_debug("Load image...\n");
-	prog = elf_load_img(uk_alloc_get_default(), (void *) img->vbase,
-			    img->len);
+	prog = elf_load_img(uk_alloc_get_default(), img, img_len);
 	if (!prog) {
 		ret = -errno;
 		goto out_free_thread;
@@ -129,13 +116,8 @@ int main(int argc, char *argv[])
 	 * NOTE: We use argv[1] as application name
 	 */
 	uk_pr_debug("Prepare application thread...\n");
-#if CONFIG_APPELFLOADER_CUSTOMAPPNAME
 	elf_ctx_init(&app_thread->ctx, prog,
-		     argc - 1, &argv[1], NULL, rand);
-#else /* !CONFIG_APPELFLOADER_CUSTOMAPPNAME */
-	elf_ctx_init(&app_thread->ctx, prog,
-		     argc, &argv[0], NULL, rand);
-#endif /* !CONFIG_APPELFLOADER_CUSTOMAPPNAME */
+		     argc, argv, NULL, rand);
 	app_thread->flags |= UK_THREADF_RUNNABLE;
 #if CONFIG_LIBPOSIX_PROCESS
 	uk_posix_process_create(uk_alloc_get_default(),
@@ -160,6 +142,10 @@ int main(int argc, char *argv[])
 
 out_free_thread:
 	uk_thread_release(app_thread);
+
+out_free_memory:
+	img_free(img);
+
 out:
 	return ret;
 }
