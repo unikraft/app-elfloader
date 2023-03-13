@@ -99,7 +99,7 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		  int argc, char *argv[], char *environ[],
 		  uint64_t rand[2])
 {
-	int i, envc;
+	int i, envc, stackvalc;
 
 	UK_ASSERT(prog);
 	UK_ASSERT((argc >= 1) && argv);
@@ -126,7 +126,22 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 	/*
 	 * We need to push the element on the stack in the inverse order they
 	 * will be read by the application's C library (i.e. argc in the end)
+	 *
+	 * Also, we need to respect the stack alignment ABI requirements at
+	 * function calls: x86_64 requires that the stack is 16-byte aligned.
+	 * Here we count how many values we push to the stack:
+	 * - environment variables (plus extra NULL pointer);
+	 * - arguments (plus extra NULL pointer and argument count);
+	 * If the number is not divisible by 2, we push one more NULL
+	 * pointer to align the stack.
+	 *
+	 * NOTE: We ignored the auxiliary vector because its size is guaranteed
+	 * to be a multiple of 16 (each vector entry is comprised of two 8-byte
+	 * values).
 	 */
+	stackvalc = (envc+1) + ((argc-1)+2);
+	if (stackvalc & 1)
+		ukarch_rctx_stackpush(ctx, (long) NULL);
 
 	/*
 	 * Auxiliary vector
