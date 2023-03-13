@@ -83,23 +83,22 @@
 #define AT_SYSINFO_EHDR		33
 #define AT_SYSINFO		32
 
+struct auxv_entry {
+	long key;
+	long val;
+};
+
 #if CONFIG_ARCH_X86_64
 	static const char *auxv_platform = "x86_64";
 #else
 #error "Unsupported architecture"
 #endif /* CONFIG_ARCH_X86_64 */
 
-#define push_auxv(ctx, key, val)				\
-	do {							\
-		ukarch_rctx_stackpush(ctx, (long) val);		\
-		ukarch_rctx_stackpush(ctx, (long) key);		\
-	} while (0)
-
 void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		  int argc, char *argv[], char *environ[],
 		  uint64_t rand[2])
 {
-	int i, envc;
+	int i, envc, elfvec_len;
 
 	UK_ASSERT(prog);
 	UK_ASSERT((argc >= 1) && argv);
@@ -123,41 +122,62 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		for (char **env = environ; *env; ++env)
 			++envc;
 
+	/* list of all auxiliary vector entries */
+	struct auxv_entry auxv[] = {
+		{ AT_PLATFORM, (uintptr_t) auxv_platform },
+		{ AT_NOTELF, 0x0 },
+		{ AT_UCACHEBSIZE, 0x0 },
+		{ AT_ICACHEBSIZE, 0x0 },
+		{ AT_DCACHEBSIZE, 0x0 },
+		{ AT_EXECFN, 0x0 },
+		{ AT_SECURE, 0x0 },
+		{ AT_EGID, 0x0 },
+		{ AT_GID, 0x0 },
+		{ AT_EUID, 0x0 },
+		{ AT_UID, 0x0 },
+		{ AT_ENTRY, prog->entry },
+		{ AT_FLAGS, 0x0 },
+		{ AT_CLKTCK, 0x64 }, /* Mimic Linux */
+		{ AT_HWCAP, 0x0 },
+		{ AT_PAGESZ, 4096 },
+		{ AT_SYSINFO, 0x0 },
+		{ AT_SYSINFO_EHDR, 0x0 },
+		{ AT_BASE, 0x0 },
+		{ AT_RANDOM, (uintptr_t) rand },
+		{ AT_PHENT, prog->ehdr_phentsize },
+		{ AT_PHNUM, prog->ehdr_phnum },
+		{ AT_PHDR, prog->start + prog->ehdr_phoff },
+		{ AT_EXECFD, 0x0 },
+		{ AT_IGNORE, 0x0 }
+	};
+	struct auxv_entry auxv_null = { AT_NULL, 0x0 };
+
+	/*
+	 * We need to respect the stack alignment ABI requirements at function
+	 * calls. (eg: x86_64 requires that the stack is 16-byte aligned)
+	 *
+	 * Here we count how many bytes are pushed to the stack:
+	 * - auxiliary vector;
+	 * - environment variables (plus extra NULL pointer);
+	 * - arguments (plus extra NULL pointer and argument count (long))
+	 */
+	elfvec_len = ((ARRAY_SIZE(auxv) + 1) * sizeof(struct auxv_entry))
+		+ (envc + 1) * sizeof(uintptr_t)
+		+ ((argc - 1) + 1) * sizeof(uintptr_t)
+		+ sizeof(long);
+
+	ctx->sp = ALIGN_DOWN(ctx->sp - elfvec_len, UKARCH_SP_ALIGN)
+		+ elfvec_len;
+
 	/*
 	 * We need to push the element on the stack in the inverse order they
 	 * will be read by the application's C library (i.e. argc in the end)
+	 *
+	 * Auxiliary vector (NOTE: we push the terminating NULL first)
 	 */
-
-	/*
-	 * Auxiliary vector
-	 */
-	push_auxv(ctx, AT_NULL, 0x0);
-	push_auxv(ctx, AT_IGNORE, 0x0);
-	push_auxv(ctx, AT_EXECFD, 0x0);
-	push_auxv(ctx, AT_PHDR, prog->start + prog->ehdr_phoff);
-	push_auxv(ctx, AT_PHNUM, prog->ehdr_phnum);
-	push_auxv(ctx, AT_PHENT, prog->ehdr_phentsize);
-	push_auxv(ctx, AT_RANDOM, (uintptr_t) rand);
-	push_auxv(ctx, AT_BASE, 0x0);
-	push_auxv(ctx, AT_SYSINFO_EHDR, 0x0);
-	push_auxv(ctx, AT_SYSINFO, 0x0);
-	push_auxv(ctx, AT_PAGESZ, 4096);
-	push_auxv(ctx, AT_HWCAP, 0x0);
-	push_auxv(ctx, AT_CLKTCK, 0x64); /* Mimic Linux */
-	push_auxv(ctx, AT_FLAGS, 0x0);
-	push_auxv(ctx, AT_ENTRY, prog->entry);
-	push_auxv(ctx, AT_UID, 0x0);
-	push_auxv(ctx, AT_EUID, 0x0);
-	push_auxv(ctx, AT_GID, 0x0);
-	push_auxv(ctx, AT_EGID, 0x0);
-	push_auxv(ctx, AT_SECURE, 0x0);
-	push_auxv(ctx, AT_SYSINFO, 0x0);
-	push_auxv(ctx, AT_EXECFN, 0x0);
-	push_auxv(ctx, AT_DCACHEBSIZE, 0x0);
-	push_auxv(ctx, AT_ICACHEBSIZE, 0x0);
-	push_auxv(ctx, AT_UCACHEBSIZE, 0x0);
-	push_auxv(ctx, AT_NOTELF, 0x0);
-	push_auxv(ctx, AT_PLATFORM, (uintptr_t) auxv_platform);
+	ukarch_rctx_stackpush(ctx, auxv_null);
+	for (i = (int) ARRAY_SIZE(auxv) - 1; i >= 0; --i)
+		ukarch_rctx_stackpush(ctx, auxv[i]);
 
 	/*
 	 * envp
