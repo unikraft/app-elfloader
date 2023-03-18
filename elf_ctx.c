@@ -139,7 +139,7 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 	 * to be a multiple of 16 (each vector entry is comprised of two 8-byte
 	 * values).
 	 */
-	stackvalc = (envc+1) + ((argc-1)+2);
+	stackvalc = (envc+1) + (argc+2);
 	if (stackvalc & 1)
 		ukarch_rctx_stackpush(ctx, (long) NULL);
 
@@ -190,9 +190,9 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 	/* Same as envp, pushing NULL first */
 	ukarch_rctx_stackpush(ctx, (long) NULL);
 	if (argc)
-		for(i=argc-1; i>0; --i)
+		for(i=argc-1; i>=0; --i)
 			ukarch_rctx_stackpush(ctx, (uintptr_t) argv[i]);
-	ukarch_rctx_stackpush(ctx, (long) argc - 1);
+	ukarch_rctx_stackpush(ctx, (long) argc);
 
 	/* ctx will enter the entry point with cleared registers. */
 	ukarch_ctx_init(ctx, ctx->sp, 0x0, prog->entry);
