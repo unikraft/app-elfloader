@@ -1,5 +1,29 @@
 # Unikraft ELF Loader
 
+## Building the ELF Loader unikernel
+
+`elfloader` can be built using the provided `Makefile`.
+
+Make sure the source code for [Unikraft](https://github.com/unikraft/unikraft), [libelf](https://github.com/unikraft/lib-libelf) and [lwip](https://github.com/unikraft/lib-lwip) is available at the paths referenced by the `UK_ROOT` and `UK_LIBS` Makefile variables, respectively.
+Execute the `make menuconfig` command to enter the configuration dialog:
+
+1. Ensure paging is enabled: `Platform Configuration -> Platform Interface Options -> Virtual memory API`,
+2. select a target platform (e.g. `KVM`),
+3. in case of `KVM`, enable `Virtio PCI device support` under `Platform Configuration -> KVM Guest -> Virtio`,
+4. under `Library Configuration -> vfscore: Configuration` choose `Automatically mount a root filesystem`, you can choose between `InitRD` and `9PFS`.
+5. This manual assumes that if you selected `9PFS`, `Default root device` is configured with `fs0`.
+6. You can enable more libraries to extend the range of supported applications. For example: `posix-environ`, `posix-event`, `posix-futex`, `posix-socket`, `lwip`
+
+Afterwards exit the configuration dialog and save your configuration.
+Executing `make` a second time triggers a build of the unikernel.
+The resulting artifacts are available inside the `build/` directory (e.g. `build/app-elfloader_kvm-x86_64`).
+
+Under `example/helloworld` you can find an example application that you can use with the ELF Loader app.
+Just type `make` to compile it.
+Please note that this compiles two executables: a statically-linked application and a dynamically-linked one.
+
+Please refer to [Getting Started with Unikraft](https://unikraft.org/docs/getting-started/) for further details about the Unikraft build process and the available configuration options.
+
 ## Executing ELF binaries
 
 The `elfloader` currently supports statically-linked and dynamically-linked applications for Linux on x86_64, as long as they are compiled position independent (PIE).
