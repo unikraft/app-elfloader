@@ -253,3 +253,13 @@ For example, the libc sources are available under Debian with the package `glibc
 ```
 (gdb) directory /usr/src/glibc/glibc-2.31
 ```
+
+#### Hint: Duplicate symbols
+
+Common symbols like `main` might exist in both the KVM image and the ELF application.
+You can be specific by referring to their respective source file if debug information is present: `helloworld.c:main` instead of just `main`.
+Alternatively, you can use `info functions [regexp]` to find the address of your symbol.
+For example, `info function ^main$` prints the address of the `main` function.
+See ["Examining the Symbol Table"] for details.
+
+["Examining the Symbol Table"]: https://sourceware.org/gdb/current/onlinedocs/gdb.html/Symbols.html#Symbols
