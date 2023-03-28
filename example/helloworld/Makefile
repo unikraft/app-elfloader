@@ -1,18 +1,19 @@
 RM = rm -f
 CC = gcc
 CFLAGS += -O2 -g -fpie
-LDFLAGS += -static-pie
-LDLIBS +=
+LDFLAGS += -pie
+LDFLAGS_STATIC += -static-pie
 
-all: helloworld
+all: helloworld helloworld_static
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-%: %.o
-	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
-
 helloworld: helloworld.o
+	$(CC) $(LDFLAGS) $^ -o $@
+
+helloworld_static: helloworld.o
+	$(CC) $(LDFLAGS_STATIC) $^ -o $@
 
 clean:
-	$(RM) *.o *~ core helloworld
+	$(RM) *.o *~ core helloworld helloworld_static
