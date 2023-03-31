@@ -285,11 +285,11 @@ struct elf_prog *elf_load_img(struct uk_alloc *a, void *img_base,
 		 * Setup memory protection
 		 */
 		if (pt) {
-			uk_pr_debug("%p: Protecting 0x%"PRIx64" - 0x%"PRIx64": %c%c%c\n",
+			uk_pr_debug("%p: Protecting 0x%llx - 0x%llx: %c%c%c\n",
 				    img_base,
-				    ALIGN_DOWN((uint64_t) (elf_prog->img
+				    (unsigned long long) ALIGN_DOWN((uint64_t) (elf_prog->img
 						+ phdr.p_paddr), __PAGE_SIZE),
-				    ALIGN_UP((uint64_t) (elf_prog->img
+				    (unsigned long long) ALIGN_UP((uint64_t) (elf_prog->img
 						+ phdr.p_paddr + phdr.p_memsz),
 						__PAGE_SIZE),
 				    phdr.p_flags & PF_R ? 'R' : '-',
