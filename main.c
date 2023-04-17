@@ -46,6 +46,12 @@
 
 #include "elf_prog.h"
 
+#if CONFIG_LIBPOSIX_ENVIRON
+extern char **environ;
+#else /* !CONFIG_LIBPOSIX_ENVIRON */
+#define environ NULL
+#endif /* !CONFIG_LIBPOSIX_ENVIRON */
+
 #ifndef PAGES2BYTES
 #define PAGES2BYTES(x) ((x) << __PAGE_SHIFT)
 #endif
@@ -137,7 +143,7 @@ int main(int argc, char *argv[])
 	 */
 	uk_pr_debug("Prepare application thread...\n");
 	elf_ctx_init(&app_thread->ctx, prog,
-		     app_argc, app_argv, NULL, rand);
+		     app_argc, app_argv, environ, rand);
 	app_thread->flags |= UK_THREADF_RUNNABLE;
 #if CONFIG_LIBPOSIX_PROCESS
 	uk_posix_process_create(uk_alloc_get_default(),

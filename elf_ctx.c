@@ -185,8 +185,10 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 	/* NOTE: As expected, this will push NULL to the stack first */
 	ukarch_rctx_stackpush(ctx, (long) NULL);
 	if (environ) {
-		for (i=envc-1; i>=0; --i)
+		for (i = envc-1; i >= 0; --i) {
+			uk_pr_debug("env[%d]=\"%s\"\n", i, environ[i]);
 			ukarch_rctx_stackpush(ctx, (uintptr_t) environ[i]);
+		}
 	}
 
 	/*
