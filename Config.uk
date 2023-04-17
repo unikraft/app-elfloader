@@ -46,6 +46,12 @@ menu "System call implementations"
 	default y
 endmenu
 
+config APPELFLOADER_STACK_NBPAGES
+	int "Application stack size (number of pages)"
+	default 32
+	help
+		<n> * 4K; 2 = 8KB, 16 = 64KB, 256 = 1MB ...
+
 config APPELFLOADER_DEBUG
        bool "Enable debug messages"
        default n

@@ -46,6 +46,10 @@
 
 #include "elf_prog.h"
 
+#ifndef PAGES2BYTES
+#define PAGES2BYTES(x) ((x) << __PAGE_SHIFT)
+#endif
+
 /*
  * Init libelf
  */
@@ -100,7 +104,8 @@ int main(int argc, char *argv[])
 	 * It will have a new stack and an ukarch_ctx
 	 */
 	app_thread = uk_thread_create_container(uk_alloc_get_default(),
-						uk_alloc_get_default(), 0,
+						uk_alloc_get_default(),
+				 PAGES2BYTES(CONFIG_APPELFLOADER_STACK_NBPAGES),
 						uk_alloc_get_default(),
 						false,
 						"elfapp",
@@ -139,6 +144,13 @@ int main(int argc, char *argv[])
 				app_thread,
 				uk_thread_current());
 #endif
+	uk_pr_debug("Application stack at %p - %p, pointer: %p\n",
+		    (void *) app_thread->_mem.stack,
+		    (void *) ((uintptr_t) app_thread->_mem.stack
+			      + PAGES2BYTES(CONFIG_APPELFLOADER_STACK_NBPAGES)),
+		    (void *) app_thread->ctx.sp);
+	uk_pr_debug("Application entrance at %p\n",
+		    (void *) app_thread->ctx.ip);
 
 	/*
 	 * Execute application
