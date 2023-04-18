@@ -95,26 +95,27 @@ struct auxv_entry {
 #endif /* CONFIG_ARCH_X86_64 */
 
 void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
-		  int argc, char *argv[], char *environ[],
+		  const char *argv0, int argc, char *argv[], char *environ[],
 		  uint64_t rand[2])
 {
 	int i, envc, elfvec_len;
 
 	UK_ASSERT(prog);
-	UK_ASSERT((argc >= 1) && argv);
+	UK_ASSERT(argv0 || ((argc >= 1) && argv));
 
-	uk_pr_debug("%s: image:          0x%"PRIx64" - 0x%"PRIx64"\n", argv[0],
-		    (uint64_t) prog->img, (uint64_t) prog->img + prog->img_len);
-	uk_pr_debug("%s: start:          0x%"PRIx64"\n", argv[0],
+	uk_pr_debug("%s: image:          0x%"PRIx64" - 0x%"PRIx64"\n",
+		    prog->name, (uint64_t) prog->vabase,
+		    (uint64_t) prog->vabase + prog->valen);
+	uk_pr_debug("%s: start:          0x%"PRIx64"\n", prog->name,
 		    (uint64_t) prog->start);
-	uk_pr_debug("%s: entry:          0x%"PRIx64"\n", argv[0],
+	uk_pr_debug("%s: entry:          0x%"PRIx64"\n", prog->name,
 		    (uint64_t) prog->entry);
-	uk_pr_debug("%s: ehdr_phoff:     0x%"PRIx64"\n", argv[0],
-		    (uint64_t) prog->ehdr_phoff);
-	uk_pr_debug("%s: ehdr_phnum:     %"PRIu64"\n",   argv[0],
-		    (uint64_t) prog->ehdr_phnum);
-	uk_pr_debug("%s: ehdr_phentsize: 0x%"PRIx64"\n", argv[0],
-		    (uint64_t) prog->ehdr_phentsize);
+	uk_pr_debug("%s: phdr.off:       0x%"PRIx64"\n", prog->name,
+		    (uint64_t) prog->phdr.off);
+	uk_pr_debug("%s: phdr.num:       %"PRIu64"\n",   prog->name,
+		    (uint64_t) prog->phdr.num);
+	uk_pr_debug("%s: phdr.entsize:   0x%"PRIx64"\n", prog->name,
+		    (uint64_t) prog->phdr.entsize);
 
 	/* count the number of environment variables */
 	envc = 0;
@@ -144,9 +145,9 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		{ AT_SYSINFO_EHDR, 0x0 },
 		{ AT_BASE, 0x0 },
 		{ AT_RANDOM, (uintptr_t) rand },
-		{ AT_PHENT, prog->ehdr_phentsize },
-		{ AT_PHNUM, prog->ehdr_phnum },
-		{ AT_PHDR, prog->start + prog->ehdr_phoff },
+		{ AT_PHENT, prog->phdr.entsize },
+		{ AT_PHNUM, prog->phdr.num },
+		{ AT_PHDR, prog->start + prog->phdr.off },
 		{ AT_EXECFD, 0x0 },
 		{ AT_IGNORE, 0x0 }
 	};
@@ -163,7 +164,7 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 	 */
 	elfvec_len = ((ARRAY_SIZE(auxv) + 1) * sizeof(struct auxv_entry))
 		+ (envc + 1) * sizeof(uintptr_t)
-		+ (argc + 1) * sizeof(uintptr_t)
+		+ (argc + (argv0 ? 1 : 0) + 1) * sizeof(uintptr_t)
 		+ sizeof(long);
 
 	ctx->sp = ALIGN_DOWN(ctx->sp - elfvec_len, UKARCH_SP_ALIGN)
@@ -199,7 +200,9 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 	if (argc)
 		for (i = argc - 1; i >= 0; --i)
 			ukarch_rctx_stackpush(ctx, (uintptr_t) argv[i]);
-	ukarch_rctx_stackpush(ctx, (long) argc);
+	if (argv0)
+		ukarch_rctx_stackpush(ctx, (uintptr_t) argv0);
+	ukarch_rctx_stackpush(ctx, (long) argc + (argv0 ? 1 : 0));
 
 	/* ctx will enter the entry point with cleared registers. */
 	ukarch_ctx_init(ctx, ctx->sp, 0x0, prog->entry);
