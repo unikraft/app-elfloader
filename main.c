@@ -1,9 +1,10 @@
 /* SPDX-License-Identifier: BSD-3-Clause */
 /*
- * Authors: Simon Kuenzer <simon.kuenzer@neclab.eu>
+ * Authors: Simon Kuenzer <simon@unikraft.io>
  *
  * Copyright (c) 2019, NEC Laboratories Europe GmbH,
  *                     NEC Corporation. All rights reserved.
+ * Copyright (c) 2023, Unikraft GmbH. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,6 +37,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <uk/errptr.h>
 #include <uk/essentials.h>
 #include <uk/plat/memory.h>
 #if CONFIG_LIBPOSIX_PROCESS
@@ -67,37 +69,50 @@ static __constructor void _libelf_init(void) {
 int main(int argc, char *argv[])
 {
 	struct ukplat_memregion_desc *img;
+	const char *progname;
 	struct elf_prog *prog;
 	struct uk_thread *app_thread;
 	uint64_t rand[2] = { 0xB0B0, 0xF00D }; /* FIXME: Use real random val */
 	int rc;
 	int ret = 0;
-	int app_argc;
-	char **app_argv;
 
 	/*
-	 * Make sure argv[0], argv[1] exists
+	 * Prepare `progname` (and `path`) from command line
+	 * or compiled-in settings
 	 */
 #if CONFIG_APPELFLOADER_CUSTOMAPPNAME
-	app_argc = argc - 1;
-	app_argv = &argv[1];
-#else /* !CONFIG_APPELFLOADER_CUSTOMAPPNAME */
-	app_argc = argc;
-	app_argv = argv;
-#endif /* !CONFIG_APPELFLOADER_CUSTOMAPPNAME */
-	if (app_argc <= 0 || !argv) {
-		uk_pr_err("Program name missing (no argv[%d])\n",
-			  argc - app_argc);
+	if (unlikely(argc <= 1 || !argv)) {
+		uk_pr_err("Program name missing (no argv[1])\n");
 		ret = 1;
 		goto out;
 	}
+	progname = argv[1];
+	/* Cut off kernel name (argv[0]) and program name (argv[1])
+	 * from argument vector
+	 */
+	argv = &argv[2];
+	argc -= 2;
+
+#else /* !CONFIG_APPELFLOADER_CUSTOMAPPNAME */
+	/* Ensure argv[0] exists and is set
+	 * NOTE: Because we can assume to have argv[0] always set by convention,
+	 *       we use an assertion here.
+	 */
+	UK_ASSERT(argc >= 1 && argv && argv[0]);
+
+	progname = argv[0];
+	/* Cut off kernel name (argv[0]) from argument vector */
+	argv = &argv[1];
+	argc -= 1;
+
+#endif /* !CONFIG_APPELFLOADER_CUSTOMAPPNAME */
 
 	/*
-	 * Find initrd
+	 * Locate ELF initramdisk
 	 */
-	uk_pr_debug("Searching for image...\n");
+	uk_pr_debug("Searching for ELF initramdisk...\n");
 	rc = ukplat_memregion_find_initrd0(&img);
-	if (rc < 0 || !img->vbase || !img->len) {
+	if (unlikely(rc < 0 || !img->vbase || !img->len)) {
 		uk_pr_err("No image found (initrd parameter missing?)\n");
 		ret = 1;
 		goto out;
@@ -114,10 +129,11 @@ int main(int argc, char *argv[])
 				 PAGES2BYTES(CONFIG_APPELFLOADER_STACK_NBPAGES),
 						uk_alloc_get_default(),
 						false,
-						"elfapp",
+						progname,
 						NULL, NULL);
-	if (!app_thread) {
-		uk_pr_err("Failed to allocate thread container\n");
+	if (unlikely(!app_thread)) {
+		uk_pr_err("%s: Failed to allocate thread container\n",
+			  progname);
 		ret = 1;
 		goto out;
 	}
@@ -125,37 +141,39 @@ int main(int argc, char *argv[])
 	/*
 	 * Parse image
 	 */
-	uk_pr_debug("Load image...\n");
+	uk_pr_debug("%s: Load executable...\n", progname);
 	prog = elf_load_img(uk_alloc_get_default(), (void *) img->vbase,
-			    img->len);
-	if (!prog) {
+			    img->len, progname);
+	if (unlikely(PTRISERR(prog) || !prog)) {
 		ret = -errno;
 		goto out_free_thread;
 	}
-	uk_pr_info("ELF program loaded to 0x%"PRIx64"-0x%"PRIx64" (%"__PRIsz" B), entry at %p\n",
-		   (uint64_t) prog->img, (uint64_t) prog->img + prog->img_len, prog->img_len,
-		   (void *) prog->entry);
+	uk_pr_info("%s: ELF program loaded to 0x%"PRIx64"-0x%"PRIx64" (%"__PRIsz" B), entry at %p\n",
+		   progname,
+		   (uint64_t) prog->vabase,
+		   (uint64_t) prog->vabase + prog->valen,
+		   prog->valen, (void *) prog->entry);
 
 	/*
 	 * Initialize application thread
-	 *
-	 * NOTE: We use argv[0] or argv[1] as application name
 	 */
-	uk_pr_debug("Prepare application thread...\n");
-	elf_ctx_init(&app_thread->ctx, prog,
-		     app_argc, app_argv, environ, rand);
+	uk_pr_debug("%s: Prepare application thread...\n", progname);
+	elf_ctx_init(&app_thread->ctx, prog, progname,
+		     argc, argv, environ, rand);
 	app_thread->flags |= UK_THREADF_RUNNABLE;
 #if CONFIG_LIBPOSIX_PROCESS
 	uk_posix_process_create(uk_alloc_get_default(),
 				app_thread,
 				uk_thread_current());
 #endif
-	uk_pr_debug("Application stack at %p - %p, pointer: %p\n",
+	uk_pr_debug("%s: Application stack at %p - %p, pointer: %p\n",
+		    progname,
 		    (void *) app_thread->_mem.stack,
 		    (void *) ((uintptr_t) app_thread->_mem.stack
 			      + PAGES2BYTES(CONFIG_APPELFLOADER_STACK_NBPAGES)),
 		    (void *) app_thread->ctx.sp);
-	uk_pr_debug("Application entrance at %p\n",
+	uk_pr_debug("%s: Application entrance at %p\n",
+		    progname,
 		    (void *) app_thread->ctx.ip);
 
 	/*
