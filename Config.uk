@@ -58,6 +58,12 @@ config APPELFLOADER_VFSEXEC_PATH
 	depends on !APPELFLOADER_CUSTOMAPPNAME
 	help
 		Compiled-in path to executable on the VFS.
+
+config APPELFLOADER_VFSEXEC_EXECBIT
+	bool "Ensure executable bit"
+	default y
+	help
+		Only execute application if executable bit is set.
 endif
 
 menu "System call implementations"

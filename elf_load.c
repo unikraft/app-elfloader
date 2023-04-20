@@ -47,6 +47,7 @@
 #include <string.h>
 #if CONFIG_LIBVFSCORE
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif /* CONFIG_LIBVFSCORE */
 #include <uk/assert.h>
@@ -343,7 +344,7 @@ static int elf_load_fdread(struct elf_prog *elf_prog, Elf *elf, int fd)
 	GElf_Ehdr ehdr;
 	GElf_Phdr phdr;
 	size_t phnum, phi;
-	int ret;
+	int ret = -1;
 
 	if (unlikely(gelf_getehdr(elf, &ehdr) == NULL)) {
 		elferr_err("%s: Failed to get executable header",
@@ -357,7 +358,8 @@ static int elf_load_fdread(struct elf_prog *elf_prog, Elf *elf, int fd)
 	if (unlikely(!elf_prog->vabase)) {
 		uk_pr_debug("%s: Not enough memory to load image (failed to allocate %"PRIu64" bytes)\n",
 			    elf_prog->name, (uint64_t) elf_prog->valen);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto err_out;
 	}
 
 	uk_pr_debug("%s: Program/Library memory region: 0x%"PRIx64"-0x%"PRIx64"\n",
@@ -558,6 +560,9 @@ struct elf_prog *elf_load_vfs(struct uk_alloc *a, const char *path,
 			      const char *progname)
 {
 	int fd = -1;
+#if CONFIG_APPELFLOADER_VFSEXEC_EXECBIT
+	struct stat fd_stat;
+#endif /* CONFIG_APPELFLOADER_VFSEXEC_EXECBIT */
 	struct elf_prog *elf_prog = NULL;
 	Elf *elf;
 	int ret;
@@ -569,6 +574,25 @@ struct elf_prog *elf_load_vfs(struct uk_alloc *a, const char *path,
 		ret = -errno;
 		goto err_out;
 	}
+
+#if CONFIG_APPELFLOADER_VFSEXEC_EXECBIT
+	/* Check for executable bit */
+	ret = fstat(fd, &fd_stat);
+	if (unlikely(ret != 0)) {
+		uk_pr_err("%s: Failed to execute %s: %s\n",
+			  progname, path, strerror(errno));
+		ret = -errno;
+		goto err_close_fd;
+	}
+	if (unlikely(!(fd_stat.st_mode & S_IXUSR))) {
+		uk_pr_err("%s: Failed to execute %s: %s\n",
+			  progname, path, strerror(EPERM));
+		ret = -EPERM;
+		goto err_close_fd;
+	}
+#else /* !CONFIG_APPELFLOADER_VFSEXEC_EXECBIT */
+	uk_pr_debug("%s: Note, ignoring executable bit state\n", progname);
+#endif /* !CONFIG_APPELFLOADER_VFSEXEC_EXECBIT */
 
 	elf = elf_open(fd);
 	if (unlikely(!elf)) {
