@@ -36,6 +36,7 @@
 #include <libelf.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <uk/errptr.h>
 #include <uk/essentials.h>
@@ -59,6 +60,36 @@ extern char **environ;
 #endif
 
 /*
+ * Internal version of `basename`
+ * We keep an own version here that modifies the input string in-place.
+ * Main reasons are that `nolibc` does not provide `basename()` and there exist
+ * two versions, in general: a GNU variant with `<string.h>` and a POSIX variant
+ * with `<libgen.h>`. Depending on the libc used, only one or the other could be
+ * available.
+ * NOTE: This version modifies the input string by overwriting trailing slashes.
+ */
+static inline char *basename_internal(char *path)
+{
+	char *bn;
+
+	if (unlikely(!path))
+		return NULL;
+
+again:
+	bn = strrchr(path, '/');
+	if (!bn) {
+		/* No slash found, path is basename */
+		return path;
+	}
+	if (bn[1] == '\0') {
+		/* Remove trailing slash */
+		bn[0] = '\0';
+		goto again;
+	}
+	return ++bn;
+}
+
+/*
  * Init libelf
  */
 static __constructor void _libelf_init(void) {
@@ -68,12 +99,18 @@ static __constructor void _libelf_init(void) {
 
 int main(int argc, char *argv[])
 {
+#if CONFIG_APPELFLOADER_INITRDEXEC
 	struct ukplat_memregion_desc *img;
+	int rc;
+#else /* CONFIG_APPELFLOADER_VFSEXEC */
+	const char *path;
+	/* reference of strdup()'ed `path` that is converted into `progname` */
+	char *progname_conv = NULL;
+#endif /* CONFIG_APPELFLOADER_VFSEXEC */
 	const char *progname;
 	struct elf_prog *prog;
 	struct uk_thread *app_thread;
 	uint64_t rand[2] = { 0xB0B0, 0xF00D }; /* FIXME: Use real random val */
-	int rc;
 	int ret = 0;
 
 	/*
@@ -86,7 +123,14 @@ int main(int argc, char *argv[])
 		ret = 1;
 		goto out;
 	}
+#if CONFIG_APPELFLOADER_INITRDEXEC
 	progname = argv[1];
+#else /* CONFIG_APPELFLOADER_VFSEXEC */
+	path          = argv[1];
+	/* retrieve progname from path */
+	progname_conv = strdup(path);
+	progname      = basename_internal(progname_conv);
+#endif /* CONFIG_APPELFLOADER_VFSEXEC */
 	/* Cut off kernel name (argv[0]) and program name (argv[1])
 	 * from argument vector
 	 */
@@ -100,13 +144,21 @@ int main(int argc, char *argv[])
 	 */
 	UK_ASSERT(argc >= 1 && argv && argv[0]);
 
+#if CONFIG_APPELFLOADER_INITRDEXEC
 	progname = argv[0];
+#else /* CONFIG_APPELFLOADER_VFSEXEC */
+	path          = CONFIG_APPELFLOADER_VFSEXEC_PATH;
+	/* retrieve progname from path */
+	progname_conv = strdup(path);
+	progname      = basename_internal(progname_conv);
+#endif /* CONFIG_APPELFLOADER_VFSEXEC */
 	/* Cut off kernel name (argv[0]) from argument vector */
 	argv = &argv[1];
 	argc -= 1;
 
 #endif /* !CONFIG_APPELFLOADER_CUSTOMAPPNAME */
 
+#if CONFIG_APPELFLOADER_INITRDEXEC
 	/*
 	 * Locate ELF initramdisk
 	 */
@@ -119,6 +171,7 @@ int main(int argc, char *argv[])
 	}
 	uk_pr_info("Image at %p, len %"__PRIsz" bytes\n",
 		   (void *) img->vbase, img->len);
+#endif /* CONFIG_APPELFLOADER_INITRDEXEC */
 
 	/*
 	 * Create thread container
@@ -141,9 +194,14 @@ int main(int argc, char *argv[])
 	/*
 	 * Parse image
 	 */
+#if CONFIG_APPELFLOADER_INITRDEXEC
 	uk_pr_debug("%s: Load executable...\n", progname);
 	prog = elf_load_img(uk_alloc_get_default(), (void *) img->vbase,
 			    img->len, progname);
+#else /* CONFIG_APPELFLOADER_VFSEXEC */
+	uk_pr_debug("%s: Load executable (%s)...\n", progname, path);
+	prog = elf_load_vfs(uk_alloc_get_default(), path, progname);
+#endif /* CONFIG_APPELFLOADER_VFSEXEC */
 	if (unlikely(PTRISERR(prog) || !prog)) {
 		ret = -errno;
 		goto out_free_thread;
@@ -194,5 +252,9 @@ int main(int argc, char *argv[])
 out_free_thread:
 	uk_thread_release(app_thread);
 out:
+#if CONFIG_APPELFLOADER_VFSEXEC
+	if (progname_conv)
+		free(progname_conv);
+#endif /* CONFIG_APPELFLOADER_VFSEXEC */
 	return ret;
 }

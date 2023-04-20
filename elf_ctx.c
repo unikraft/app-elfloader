@@ -130,7 +130,8 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		{ AT_UCACHEBSIZE, 0x0 },
 		{ AT_ICACHEBSIZE, 0x0 },
 		{ AT_DCACHEBSIZE, 0x0 },
-		{ AT_EXECFN, 0x0 },
+		/* path to executable */
+		{ AT_EXECFN, (long) (prog->path ? prog->path : prog->name) },
 		{ AT_SECURE, 0x0 },
 		{ AT_EGID, 0x0 },
 		{ AT_GID, 0x0 },
@@ -148,7 +149,6 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		{ AT_PHENT, prog->phdr.entsize },
 		{ AT_PHNUM, prog->phdr.num },
 		{ AT_PHDR, prog->start + prog->phdr.off },
-		{ AT_EXECFD, 0x0 },
 		{ AT_IGNORE, 0x0 }
 	};
 	struct auxv_entry auxv_null = { AT_NULL, 0x0 };

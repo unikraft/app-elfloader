@@ -34,6 +34,7 @@
 #ifndef ELF_PROG_H
 #define ELF_PROG_H
 
+#include <uk/config.h>
 #include <stdint.h>
 #include <inttypes.h>
 #include <stddef.h>
@@ -45,6 +46,7 @@
 struct elf_prog {
 	struct uk_alloc *a;
 	const char *name;
+	const char *path; /* path to executable */
 	void *vabase;	/* base address of loaded image in virtual memory */
 	size_t valen;	/* length of loaded image in virtual memory */
 
@@ -82,6 +84,31 @@ struct elf_prog {
  */
 struct elf_prog *elf_load_img(struct uk_alloc *a, void *img_base,
 			      size_t img_len, const char *progname);
+
+#if CONFIG_LIBVFSCORE
+/**
+ * Load an ELF program from a file descriptor region. After loading,
+ * the file descriptor can be closed.
+ *
+ * @param a:
+ *   Reference to allocator for allocating space for program sections
+ * @param path:
+ *   VFS path to ELF executable file
+ *   The actual c-strings should not be released/modified while the returned
+ *   elf_prog is in use.
+ * @param progname:
+ *   Program name used for kernel messages, ideally matches with argv[0] of
+ *   application that is loaded.
+ *   The actual c-strings should not be released/modified while the returned
+ *   elf_prog is in use.
+ * @return:
+ *   On success an elf_prog instance is returned. Such a program
+ *   can be prepared to be started with elf_ctx_init(). On errors,
+ *   NULL is returned and `errno` is set accordingly.
+ */
+struct elf_prog *elf_load_vfs(struct uk_alloc *a, const char *path,
+			      const char *progname);
+#endif /* CONFIG_LIBVFSCORE */
 
 /**
  * Initializes an ukarch_ctx with a loaded ELF program. This program
