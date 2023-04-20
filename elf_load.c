@@ -45,6 +45,10 @@
 #include <gelf.h>
 #include <errno.h>
 #include <string.h>
+#if CONFIG_LIBVFSCORE
+#include <fcntl.h>
+#include <unistd.h>
+#endif /* CONFIG_LIBVFSCORE */
 #include <uk/assert.h>
 #include <uk/print.h>
 #include <uk/essentials.h>
@@ -302,6 +306,120 @@ err_out:
 	return ret;
 }
 
+#if CONFIG_LIBVFSCORE
+/* Read from fd exact `len` bytes from offset `roff`, fail otherwise */
+static int elf_load_do_fdread(int fd, off_t roff, void *dst, size_t len)
+{
+	char *ptr;
+	ssize_t rc;
+
+	ptr = (char *) dst;
+	while (len) {
+		rc = pread(fd, ptr, len, roff);
+		if (unlikely(rc < 0)) {
+			if (errno == EINTR)
+				continue; /* retry */
+			/* abort on any other error */
+			return -errno;
+		}
+		if (unlikely(rc == 0))
+			break; /* end-of-file */
+
+		/* prepare for next piece to read */
+		len -= rc;
+		ptr += rc;
+		roff += rc;
+	}
+
+	if (unlikely(len != 0))
+		return -ENOEXEC; /* unexpected EOF */
+	return 0;
+}
+
+static int elf_load_fdread(struct elf_prog *elf_prog, Elf *elf, int fd)
+{
+	uintptr_t vastart;
+	uintptr_t vaend;
+	GElf_Ehdr ehdr;
+	GElf_Phdr phdr;
+	size_t phnum, phi;
+	int ret;
+
+	if (unlikely(gelf_getehdr(elf, &ehdr) == NULL)) {
+		elferr_err("%s: Failed to get executable header",
+			   elf_prog->name);
+		ret = -ENOEXEC;
+		goto err_out;
+	}
+
+	elf_prog->vabase = uk_memalign(elf_prog->a, __PAGE_SIZE,
+				       elf_prog->valen);
+	if (unlikely(!elf_prog->vabase)) {
+		uk_pr_debug("%s: Not enough memory to load image (failed to allocate %"PRIu64" bytes)\n",
+			    elf_prog->name, (uint64_t) elf_prog->valen);
+		return -ENOMEM;
+	}
+
+	uk_pr_debug("%s: Program/Library memory region: 0x%"PRIx64"-0x%"PRIx64"\n",
+		    elf_prog->name,
+		    (uint64_t) elf_prog->vabase,
+		    (uint64_t) elf_prog->vabase + elf_prog->valen);
+
+	/* Load segments to allocated memory and set start & entry */
+	if (unlikely(elf_getphnum(elf, &phnum) == 0)) {
+		elferr_err("%s: Failed to get number of program headers",
+			   elf_prog->name);
+		ret = -ENOEXEC;
+		goto err_free_img;
+	}
+	elf_prog->entry = (uintptr_t) elf_prog->vabase + ehdr.e_entry;
+	for (phi = 0; phi < phnum; ++phi) {
+		if (gelf_getphdr(elf, phi, &phdr) != &phdr) {
+			elferr_warn("%s: Failed to get program header %"PRIu64"\n",
+				    elf_prog->name, (uint64_t) phi);
+			continue;
+		}
+		if (phdr.p_type != PT_LOAD)
+			continue;
+
+		vastart = phdr.p_paddr + (uintptr_t) elf_prog->vabase;
+		vaend   = vastart + phdr.p_filesz;
+		if (!elf_prog->start || (vastart < elf_prog->start))
+			elf_prog->start = vastart;
+
+		uk_pr_debug("%s: Reading 0x%"PRIx64" - 0x%"PRIx64" to 0x%"PRIx64" - 0x%"PRIx64"\n",
+			    elf_prog->name,
+			    (uint64_t) phdr.p_offset,
+			    (uint64_t) phdr.p_offset + phdr.p_filesz,
+			    (uint64_t) vastart,
+			    (uint64_t) vaend);
+		ret = elf_load_do_fdread(fd, phdr.p_offset, (void *) vastart,
+					 phdr.p_filesz);
+		if (unlikely(ret < 0)) {
+			uk_pr_err("%s: Read error: %s\n", elf_prog->name,
+				  strerror(-ret));
+			goto err_free_img;
+		}
+
+		/* Compute the area that needs to be zeroed */
+		vastart = vaend;
+		vaend   = vastart + (phdr.p_memsz - phdr.p_filesz);
+		vaend   = PAGE_ALIGN_UP(vaend);
+		uk_pr_debug("%s: Zeroing 0x%"PRIx64" - 0x%"PRIx64"\n",
+			    elf_prog->name,
+			    (uint64_t) (vastart),
+			    (uint64_t) (vaend));
+		memset((void *)(vastart), 0, vaend - vastart);
+	}
+	return 0;
+
+err_free_img:
+	elf_unload_vaimg(elf_prog);
+err_out:
+	return ret;
+}
+#endif /* CONFIG_LIBVFSCORE */
+
 #if CONFIG_PAGING
 static int elf_load_ptprotect(struct elf_prog *elf_prog, Elf *elf)
 {
@@ -434,3 +552,81 @@ err_end_elf:
 err_out:
 	return ERR2PTR(ret);
 }
+
+#if CONFIG_LIBVFSCORE
+struct elf_prog *elf_load_vfs(struct uk_alloc *a, const char *path,
+			      const char *progname)
+{
+	int fd = -1;
+	struct elf_prog *elf_prog = NULL;
+	Elf *elf;
+	int ret;
+
+	fd = open(path, O_RDONLY);
+	if (unlikely(fd < 0)) {
+		uk_pr_err("%s: Failed to execute %s: %s\n",
+			  progname, path, strerror(errno));
+		ret = -errno;
+		goto err_out;
+	}
+
+	elf = elf_open(fd);
+	if (unlikely(!elf)) {
+		elferr_err("%s: Failed to initialize ELF parser\n",
+			   progname);
+		ret = -EBUSY;
+		goto err_close_fd;
+	}
+
+	elf_prog = uk_calloc(a, 1, sizeof(*elf_prog));
+	if (unlikely(!elf_prog)) {
+		ret = -ENOMEM;
+		goto err_end_elf;
+	}
+	elf_prog->a = a;
+	elf_prog->name = progname;
+	elf_prog->path = path;
+
+	ret = elf_load_parse(elf_prog, elf);
+	if (unlikely(ret < 0)) {
+		uk_pr_err("%s: Parsing of ELF image failed: %s (%d)\n",
+			  progname, strerror(-ret), ret);
+		goto err_free_elf_prog;
+	}
+	if (unlikely(elf_prog->interp.required)) {
+		uk_pr_err("%s: Requests program interpreter: Unsupported\n",
+			  progname);
+		ret = -ENOTSUP;
+		goto err_free_elf_prog;
+	}
+
+	ret = elf_load_fdread(elf_prog, elf, fd);
+	if (unlikely(ret < 0)) {
+		uk_pr_err("%s: Failed to copy the executable: %d\n",
+			  progname, ret);
+		goto err_free_elf_prog;
+	}
+
+	ret = elf_load_ptprotect(elf_prog, elf);
+	if (unlikely(ret < 0)) {
+		uk_pr_err("%s: Failed to set page protection bits: %d\n",
+			  progname, ret);
+		goto err_unload_vaimg;
+	}
+
+	elf_end(elf);
+	close(fd);
+	return elf_prog;
+
+err_unload_vaimg:
+	elf_unload_vaimg(elf_prog);
+err_free_elf_prog:
+	uk_free(a, elf_prog);
+err_end_elf:
+	elf_end(elf);
+err_close_fd:
+	close(fd);
+err_out:
+	return ERR2PTR(ret);
+}
+#endif /* CONFIG_LIBVFSCORE */
