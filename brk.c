@@ -47,35 +47,39 @@
 #define HEAP_LEN   PAGES2BYTES(CONFIG_APPELFLOADER_BRK_NBPAGES)
 
 /*
- * For now we only support one custom stack
+ * For now we only support one custom heap
  */
 static void *base = NULL;
+static void *brk_cur = NULL;
 static void *zeroed = NULL;
 static intptr_t len = 0;
 
 UK_LLSYSCALL_R_DEFINE(void *, brk, void *, addr)
 {
-	if (!addr && base) {
-		/* another brk context request although we have one already */
-		uk_pr_crit("Cannot handle multiple user space heaps: Not implemented!\n");
-		return ERR2PTR(-ENOMEM);
-	}
-
-	if (!addr) {
-		/* allocate brk context */
+	/* allocate brk context */
+	if (!base) {
 		base = uk_palloc(uk_alloc_get_default(), HEAP_PAGES);
 		if (!base) {
 			uk_pr_crit("Could not allocate memory for heap (%"PRIu64" KiB): Out of memory\n",
 				   (uint64_t) HEAP_LEN / 1024);
 			return ERR2PTR(-ENOMEM);
 		}
+
+		/* initialize brk_cur with start of allocated heap region */
+		brk_cur = base;
 		zeroed = base;
-		addr = base;
+		len = 0;
+
+		uk_pr_debug("New brk heap region: %p-%p\n",
+			    base, base + HEAP_LEN);
 	}
 
+	UK_ASSERT(brk_cur != NULL);
+
 	if (addr < base || addr >= (base + HEAP_LEN)) {
-		uk_pr_crit("Failed to increase heap: Not implemented!\n");
-		return ERR2PTR(-ENOMEM);
+		uk_pr_debug("Outside of brk range, return current brk %p\n",
+			    brk_cur);
+		return brk_cur;
 	}
 
 	/* Zero out requested memory (e.g., glibc requires) */
@@ -83,10 +87,13 @@ UK_LLSYSCALL_R_DEFINE(void *, brk, void *, addr)
 		uk_pr_debug("zeroing %p-%p...\n", zeroed, addr);
 		memset(zeroed, 0x0, (size_t) (addr - zeroed));
 	}
-	zeroed = addr;
 
+	brk_cur = addr;
+	zeroed = addr;
 	len = addr - base;
+
 	uk_pr_debug("brk @ %p (brk heap region: %p-%p)\n", addr, base, base + HEAP_LEN);
+
 	return addr;
 }
 
