@@ -28,6 +28,8 @@ choice
 		select LIBVFSCORE
 		help
 			Loads an ELF executable from the virtual filesystem.
+			elfloader will automatically side-load a dynamic loader
+			if it is announced via the PT_INTERP program header.
 			This option is intended for most use cases.
 
 	config APPELFLOADER_INITRDEXEC
@@ -38,6 +40,7 @@ choice
 			the ELF binary image (no filesystem). This option is
 			intended for creating elfloader unikernels without VFS
 			support.
+			Only statically-linked PIE executables are supported.
 endchoice
 
 config APPELFLOADER_CUSTOMAPPNAME

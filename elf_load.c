@@ -45,6 +45,7 @@
 #include <gelf.h>
 #include <errno.h>
 #include <string.h>
+#include <stdlib.h>
 #if CONFIG_LIBVFSCORE
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -367,13 +368,50 @@ static int elf_load_fdread(struct elf_prog *elf_prog, Elf *elf, int fd)
 		    (uint64_t) elf_prog->vabase,
 		    (uint64_t) elf_prog->vabase + elf_prog->valen);
 
-	/* Load segments to allocated memory and set start & entry */
 	if (unlikely(elf_getphnum(elf, &phnum) == 0)) {
 		elferr_err("%s: Failed to get number of program headers",
 			   elf_prog->name);
 		ret = -ENOEXEC;
 		goto err_free_img;
 	}
+
+	/* Load path to program interpreter (typically: dynamic linker) */
+	if (elf_prog->interp.required) {
+		for (phi = 0; phi < phnum; ++phi) {
+			if (gelf_getphdr(elf, phi, &phdr) != &phdr) {
+				elferr_warn("%s: Failed to get program header %"PRIu64"\n",
+					    elf_prog->name, (uint64_t) phi);
+				continue;
+			}
+			if (phdr.p_type != PT_INTERP)
+				continue;
+
+			UK_ASSERT(!elf_prog->interp.path);
+
+			elf_prog->interp.path = malloc(phdr.p_filesz);
+			if (!elf_prog->interp.path) {
+				uk_pr_err("%s: Failed to load INTERP path: %s\n",
+					  elf_prog->name, strerror(-ret));
+				goto err_out;
+			}
+			ret = elf_load_do_fdread(fd, phdr.p_offset,
+						 elf_prog->interp.path,
+						 phdr.p_filesz);
+			if (ret < 0) {
+				uk_pr_err("%s: Read error: %s\n",
+					  elf_prog->name, strerror(-ret));
+				goto err_free_interp;
+			}
+			/* Enforce zero termination, this should normally
+			 * be the case with the PT_INTERP section content.
+			 * We are playing safe here.
+			 */
+			elf_prog->interp.path[phdr.p_filesz - 1] = '\0';
+			break;
+		}
+	}
+
+	/* Load segments to allocated memory and set start & entry */
 	elf_prog->entry = (uintptr_t) elf_prog->vabase + ehdr.e_entry;
 	for (phi = 0; phi < phnum; ++phi) {
 		if (gelf_getphdr(elf, phi, &phdr) != &phdr) {
@@ -417,6 +455,9 @@ static int elf_load_fdread(struct elf_prog *elf_prog, Elf *elf, int fd)
 
 err_free_img:
 	elf_unload_vaimg(elf_prog);
+err_free_interp:
+	free(elf_prog->interp.path);
+	elf_prog->interp.path = NULL;
 err_out:
 	return ret;
 }
@@ -491,9 +532,50 @@ static int elf_load_ptprotect(struct elf_prog *elf_prog, Elf *elf)
 	}
 	return 0;
 }
+
+static void elf_unload_ptunprotect(struct elf_prog *elf_prog)
+{
+	uintptr_t vastart;
+	uintptr_t vaend;
+	uintptr_t valen;
+	struct uk_vas *vas;
+	int ret;
+
+	vas = uk_vas_get_active();
+	if (PTRISERR(vas)) {
+		uk_pr_warn("%s: Unable to restore page protections bits.\n",
+			   elf_prog->name);
+		return;
+	}
+
+	vastart = (uintptr_t) elf_prog->vabase;
+	vaend   = vastart + (uintptr_t) elf_prog->valen;
+	vastart = PAGE_ALIGN_DOWN(vastart);
+	vaend   = PAGE_ALIGN_UP(vaend);
+	valen   = vaend - vastart;
+	uk_pr_debug("%s: Restore RW- protection: 0x%"PRIx64" - 0x%"PRIx64"\n",
+		    elf_prog->name, (uint64_t) vastart, (uint64_t) vaend);
+	ret = uk_vma_set_attr(vas, vastart, valen,
+			      (PAGE_ATTR_PROT_READ | PAGE_ATTR_PROT_WRITE), 0);
+	if (unlikely(ret < 0))
+		uk_pr_err("%s: Failed to restore protection bits: %d.\n",
+			  elf_prog->name, ret);
+}
 #else /* !CONFIG_LIBUKVMEM */
 #define elf_load_ptprotect(p, e) ({ 0; })
+#define elf_unload_ptunprotect(p) do {} while (0)
 #endif /* !CONFIG_LIBUKVMEM */
+
+void elf_unload(struct elf_prog *elf_prog)
+{
+	if (elf_prog->interp.prog && !PTRISERR(elf_prog->interp.prog))
+		elf_unload(elf_prog->interp.prog);
+	if (elf_prog->interp.path)
+		free(elf_prog->interp.path);
+	elf_unload_ptunprotect(elf_prog);
+	elf_unload_vaimg(elf_prog);
+	uk_free(elf_prog->a, elf_prog);
+}
 
 struct elf_prog *elf_load_img(struct uk_alloc *a, void *img_base,
 			      size_t img_len, const char *progname)
@@ -559,8 +641,8 @@ err_out:
 }
 
 #if CONFIG_LIBVFSCORE
-struct elf_prog *elf_load_vfs(struct uk_alloc *a, const char *path,
-			      const char *progname)
+static struct elf_prog *do_elf_load_vfs(struct uk_alloc *a, const char *path,
+					const char *progname, bool nointerp)
 {
 	int fd = -1;
 #if CONFIG_APPELFLOADER_VFSEXEC_EXECBIT
@@ -620,7 +702,7 @@ struct elf_prog *elf_load_vfs(struct uk_alloc *a, const char *path,
 			  progname, strerror(-ret), ret);
 		goto err_free_elf_prog;
 	}
-	if (unlikely(elf_prog->interp.required)) {
+	if (unlikely(nointerp && elf_prog->interp.required)) {
 		uk_pr_err("%s: Requests program interpreter: Unsupported\n",
 			  progname);
 		ret = -ENOTSUP;
@@ -655,5 +737,42 @@ err_close_fd:
 	close(fd);
 err_out:
 	return ERR2PTR(ret);
+}
+
+struct elf_prog *elf_load_vfs(struct uk_alloc *a, const char *path,
+			      const char *progname)
+{
+	struct elf_prog *elf_prog;
+	int err;
+
+	elf_prog = do_elf_load_vfs(a, path, progname, false);
+	if (PTRISERR(elf_prog) || !elf_prog) {
+		err = PTR2ERR(elf_prog);
+		goto err_out;
+	}
+
+	/* Load program interpreter/dynamic loader */
+	if (elf_prog->interp.required) {
+		uk_pr_debug("%s: Loading program interpreter %s...\n",
+			    elf_prog->name, elf_prog->interp.path);
+		elf_prog->interp.prog = do_elf_load_vfs(a,
+							elf_prog->interp.path,
+							"<interp>", true);
+		if (unlikely(PTRISERR(elf_prog->interp.prog) ||
+			     !elf_prog->interp.prog)) {
+			err = PTR2ERR(elf_prog->interp.prog);
+			uk_pr_err("%s: Failed to load program interpreter %s: %s\n",
+				  elf_prog->name, elf_prog->interp.path,
+				  strerror(-err));
+			goto err_unload_prog;
+		}
+	}
+
+	return elf_prog;
+
+err_unload_prog:
+	elf_unload(elf_prog);
+err_out:
+	return ERR2PTR(err);
 }
 #endif /* CONFIG_LIBVFSCORE */
