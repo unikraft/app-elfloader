@@ -60,6 +60,8 @@ struct elf_prog {
 	} phdr;
 	struct {
 		bool required;
+		char *path;
+		struct elf_prog *prog;
 	} interp;
 };
 
@@ -109,6 +111,15 @@ struct elf_prog *elf_load_img(struct uk_alloc *a, void *img_base,
 struct elf_prog *elf_load_vfs(struct uk_alloc *a, const char *path,
 			      const char *progname);
 #endif /* CONFIG_LIBVFSCORE */
+
+/**
+ * Release a loaded ELF program
+ * NOTE: This covers only the non-runtime resources, basically everything
+ *       allocated by `elf_load_mem()` and `elf_load_vfs()`. Any further system
+ *       state changes due to program execution (`elf_ctx_init()`) are not
+ *       covered.
+ */
+void elf_unload(struct elf_prog *elf_prog);
 
 /**
  * Initializes an ukarch_ctx with a loaded ELF program. This program

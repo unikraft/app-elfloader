@@ -116,6 +116,16 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		    (uint64_t) prog->phdr.num);
 	uk_pr_debug("%s: phdr.entsize:   0x%"PRIx64"\n", prog->name,
 		    (uint64_t) prog->phdr.entsize);
+	if (prog->interp.prog) {
+		uk_pr_debug("%s: interp:         0x%"PRIx64" - 0x%"PRIx64"\n",
+			    prog->name, (uint64_t) prog->interp.prog->vabase,
+			    (uint64_t) prog->interp.prog->vabase +
+			    prog->interp.prog->valen);
+		uk_pr_debug("%s: interp.start:   0x%"PRIx64"\n", prog->name,
+			    (uint64_t) prog->interp.prog->start);
+		uk_pr_debug("%s: interp.entry:   0x%"PRIx64"\n", prog->name,
+			    (uint64_t) prog->interp.prog->entry);
+	}
 
 	/* count the number of environment variables */
 	envc = 0;
@@ -144,7 +154,9 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		{ AT_PAGESZ, 4096 },
 		{ AT_SYSINFO, 0x0 },
 		{ AT_SYSINFO_EHDR, 0x0 },
-		{ AT_BASE, 0x0 },
+		/* base addr of interpreter */
+		{ AT_BASE, prog->interp.prog ?
+			   prog->interp.prog->start : 0x0 },
 		{ AT_RANDOM, (uintptr_t) rand },
 		{ AT_PHENT, prog->phdr.entsize },
 		{ AT_PHNUM, prog->phdr.num },
@@ -204,6 +216,18 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		ukarch_rctx_stackpush(ctx, (uintptr_t) argv0);
 	ukarch_rctx_stackpush(ctx, (long) argc + (argv0 ? 1 : 0));
 
+	UK_ASSERT(IS_ALIGNED(ctx->sp, UKARCH_SP_ALIGN));
+
 	/* ctx will enter the entry point with cleared registers. */
-	ukarch_ctx_init(ctx, ctx->sp, 0x0, prog->entry);
+	if (prog->interp.required) {
+		struct elf_prog *interp = prog->interp.prog;
+
+		UK_ASSERT(prog->interp.prog);
+
+		/* dynamically linked executable, jump into loader instead */
+		ukarch_ctx_init(ctx, ctx->sp, 0x0, interp->entry);
+	} else {
+		/* statically linked executable */
+		ukarch_ctx_init(ctx, ctx->sp, 0x0, prog->entry);
+	}
 }
