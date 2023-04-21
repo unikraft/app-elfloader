@@ -55,10 +55,10 @@
 #include <uk/essentials.h>
 #include <uk/arch/limits.h>
 #include <uk/errptr.h>
-#if CONFIG_PAGING
-#include <uk/plat/paging.h>
+#if CONFIG_LIBUKVMEM
+#include <uk/vmem.h>
 #include <uk/arch/limits.h>
-#endif /* CONFIG_PAGING */
+#endif /* CONFIG_LIBUKVMEM */
 
 #include "libelf_helper.h"
 #include "elf_prog.h"
@@ -210,7 +210,7 @@ static int elf_load_parse(struct elf_prog *elf_prog, Elf *elf)
 	elf_prog->phdr.off = ehdr.e_phoff;
 	elf_prog->phdr.num = ehdr.e_phnum;
 	elf_prog->phdr.entsize = ehdr.e_phentsize;
-	elf_prog->valen = (prog_upperl - prog_lowerl);
+	elf_prog->valen = PAGE_ALIGN_UP(prog_upperl - prog_lowerl);
 	return 0;
 
 err_out:
@@ -422,19 +422,20 @@ err_out:
 }
 #endif /* CONFIG_LIBVFSCORE */
 
-#if CONFIG_PAGING
+#if CONFIG_LIBUKVMEM
 static int elf_load_ptprotect(struct elf_prog *elf_prog, Elf *elf)
 {
 	uintptr_t vastart;
 	uintptr_t vaend;
-	struct uk_pagetable *pt;
+	uintptr_t valen;
+	struct uk_vas *vas;
 	GElf_Ehdr ehdr;
 	GElf_Phdr phdr;
 	size_t phnum, phi;
 	int ret;
 
-	pt = ukplat_pt_get_active();
-	if (unlikely(PTRISERR(pt))) {
+	vas = uk_vas_get_active();
+	if (unlikely(PTRISERR(vas))) {
 		uk_pr_warn("%s: Unable to set page protections bits. Continuing without. Program execution might be unsafe or fail.\n",
 			   elf_prog->name);
 		return 0;
@@ -466,15 +467,17 @@ static int elf_load_ptprotect(struct elf_prog *elf_prog, Elf *elf)
 
 		vastart = phdr.p_paddr + (uintptr_t) elf_prog->vabase;
 		vaend   = vastart + phdr.p_memsz;
+		vastart = PAGE_ALIGN_DOWN(vastart);
+		vaend   = PAGE_ALIGN_UP(vaend);
+		valen   = vaend - vastart;
 		uk_pr_debug("%s: Protecting 0x%"PRIx64" - 0x%"PRIx64": %c%c%c\n",
 				elf_prog->name,
-				PAGE_ALIGN_DOWN((uint64_t) (vastart)),
-				PAGE_ALIGN_UP((uint64_t) (vaend)),
+				(uint64_t) vastart,
+				(uint64_t) vaend,
 				phdr.p_flags & PF_R ? 'R' : '-',
 				phdr.p_flags & PF_W ? 'W' : '-',
 				phdr.p_flags & PF_X ? 'X' : '-');
-		ret = ukplat_page_set_attr(pt, PAGE_ALIGN_DOWN((__vaddr_t)
-				vastart), PAGE_ALIGN_UP(phdr.p_memsz),
+		ret = uk_vma_set_attr(vas, vastart, valen,
 				((phdr.p_flags & PF_R) ?
 				  PAGE_ATTR_PROT_READ  : 0x0) |
 				((phdr.p_flags & PF_W) ?
@@ -488,9 +491,9 @@ static int elf_load_ptprotect(struct elf_prog *elf_prog, Elf *elf)
 	}
 	return 0;
 }
-#else /* !CONFIG_PAGING */
+#else /* !CONFIG_LIBUKVMEM */
 #define elf_load_ptprotect(p, e) ({ 0; })
-#endif /* !CONFIG_PAGING */
+#endif /* !CONFIG_LIBUKVMEM */
 
 struct elf_prog *elf_load_img(struct uk_alloc *a, void *img_base,
 			      size_t img_len, const char *progname)
