@@ -62,23 +62,25 @@ int main(int argc, char *argv[])
 	uint64_t rand[2] = { 0xB0B0, 0xF00D }; /* FIXME: Use real random val */
 	int rc;
 	int ret = 0;
+	int app_argc;
+	char **app_argv;
 
 	/*
 	 * Make sure argv[0], argv[1] exists
 	 */
 #if CONFIG_APPELFLOADER_CUSTOMAPPNAME
-	if (argc <= 1 || !argv) {
-		uk_pr_err("Program name missing (no argv[1])\n");
-		ret = 1;
-		goto out;
-	}
+	app_argc = argc - 1;
+	app_argv = &argv[1];
 #else /* !CONFIG_APPELFLOADER_CUSTOMAPPNAME */
-	if (argc <= 0 || !argv) {
-		uk_pr_err("Program name missing (no argv[0])\n");
+	app_argc = argc;
+	app_argv = argv;
+#endif /* !CONFIG_APPELFLOADER_CUSTOMAPPNAME */
+	if (app_argc <= 0 || !argv) {
+		uk_pr_err("Program name missing (no argv[%d])\n",
+			  argc - app_argc);
 		ret = 1;
 		goto out;
 	}
-#endif /* !CONFIG_APPELFLOADER_CUSTOMAPPNAME */
 
 	/*
 	 * Find initrd
@@ -126,16 +128,11 @@ int main(int argc, char *argv[])
 	/*
 	 * Initialize application thread
 	 *
-	 * NOTE: We use argv[1] as application name
+	 * NOTE: We use argv[0] or argv[1] as application name
 	 */
 	uk_pr_debug("Prepare application thread...\n");
-#if CONFIG_APPELFLOADER_CUSTOMAPPNAME
 	elf_ctx_init(&app_thread->ctx, prog,
-		     argc - 1, &argv[1], NULL, rand);
-#else /* !CONFIG_APPELFLOADER_CUSTOMAPPNAME */
-	elf_ctx_init(&app_thread->ctx, prog,
-		     argc, &argv[0], NULL, rand);
-#endif /* !CONFIG_APPELFLOADER_CUSTOMAPPNAME */
+		     app_argc, app_argv, NULL, rand);
 	app_thread->flags |= UK_THREADF_RUNNABLE;
 #if CONFIG_LIBPOSIX_PROCESS
 	uk_posix_process_create(uk_alloc_get_default(),
