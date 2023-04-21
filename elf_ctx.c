@@ -163,7 +163,7 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 	 */
 	elfvec_len = ((ARRAY_SIZE(auxv) + 1) * sizeof(struct auxv_entry))
 		+ (envc + 1) * sizeof(uintptr_t)
-		+ ((argc - 1) + 1) * sizeof(uintptr_t)
+		+ (argc + 1) * sizeof(uintptr_t)
 		+ sizeof(long);
 
 	ctx->sp = ALIGN_DOWN(ctx->sp - elfvec_len, UKARCH_SP_ALIGN)
@@ -195,9 +195,9 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 	/* Same as envp, pushing NULL first */
 	ukarch_rctx_stackpush(ctx, (long) NULL);
 	if (argc)
-		for(i=argc-1; i>0; --i)
+		for (i = argc - 1; i >= 0; --i)
 			ukarch_rctx_stackpush(ctx, (uintptr_t) argv[i]);
-	ukarch_rctx_stackpush(ctx, (long) argc - 1);
+	ukarch_rctx_stackpush(ctx, (long) argc);
 
 	/* ctx will enter the entry point with cleared registers. */
 	ukarch_ctx_init(ctx, ctx->sp, 0x0, prog->entry);
