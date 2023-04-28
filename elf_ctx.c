@@ -152,8 +152,6 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		{ AT_CLKTCK, 0x64 }, /* Mimic Linux */
 		{ AT_HWCAP, 0x0 },
 		{ AT_PAGESZ, 4096 },
-		{ AT_SYSINFO, 0x0 },
-		{ AT_SYSINFO_EHDR, 0x0 },
 		/* base addr of interpreter */
 		{ AT_BASE, prog->interp.prog ?
 			   prog->interp.prog->start : 0x0 },
