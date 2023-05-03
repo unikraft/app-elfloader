@@ -46,6 +46,9 @@
 #endif /* CONFIG_LIBPOSIX_PROCESS */
 #include <uk/thread.h>
 #include <uk/sched.h>
+#if CONFIG_LIBUKSWRAND
+#include <uk/swrand.h>
+#endif /* CONFIG_LIBUKSWRAND */
 
 #include "elf_prog.h"
 
@@ -110,7 +113,7 @@ int main(int argc, char *argv[])
 	const char *progname;
 	struct elf_prog *prog;
 	struct uk_thread *app_thread;
-	uint64_t rand[2] = { 0xB0B0, 0xF00D }; /* FIXME: Use real random val */
+	uint64_t rand[2];
 	int ret = 0;
 
 	/*
@@ -215,6 +218,15 @@ int main(int argc, char *argv[])
 	/*
 	 * Initialize application thread
 	 */
+#if CONFIG_LIBUKSWRAND
+	uk_swrand_fill_buffer(rand, sizeof(rand));
+#else /* !CONFIG_LIBUKSWRAND */
+	/* Without random numbers, use a hardcoded seed */
+	uk_pr_warn("%s: Using hard-coded random seed\n", progname);
+	rand[0] = 0xB0B0;
+	rand[1] = 0xF00D;
+#endif /* !CONFIG_LIBUKSWRAND */
+
 	uk_pr_debug("%s: Prepare application thread...\n", progname);
 	elf_ctx_init(&app_thread->ctx, prog, progname,
 		     argc, argv, environ, rand);

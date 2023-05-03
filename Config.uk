@@ -17,6 +17,7 @@ config APPELFLOADER_DEPENDENCIES
 	imply LIBVFSCORE
 	imply LIBPOSIX_SYSINFO
 	imply LIBPOSIX_USER
+	imply LIBUKSWRAND
 
 ### App configuration
 choice
