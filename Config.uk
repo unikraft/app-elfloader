@@ -100,3 +100,39 @@ config APPELFLOADER_STACK_NBPAGES
 config APPELFLOADER_DEBUG
        bool "Enable debug messages"
        default n
+
+menuconfig VDSO
+	bool "Provide VDSO Image"
+	default n
+	help
+		Provide a VDSO image in the kernel, and pass it to the application
+
+if VDSO
+
+menu "VDSO functions"
+	config VDSO_USE_CLOCK_GETRES
+		bool "Enable __vdso_clock_getres"
+		default n
+
+	config VDSO_USE_CLOCK_GETTIME
+		bool "Enable __vdso_clock_gettime"
+		default n
+
+	config VDSO_USE_GETCPU
+		bool "Enable __vdso_getcpu"
+		default n
+
+	config VDSO_USE_GETTIMEOFDAY
+		bool "Enable __vdso_gettimeofday"
+		default n
+
+	config VDSO_USE_TIME
+		bool "Enable __vdso_time"
+		default n
+endmenu
+
+config VDSO_IMAGE_SIZE
+	int "Reserved space for VDSO image in kernel"
+	default 10240
+
+endif
