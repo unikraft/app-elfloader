@@ -88,6 +88,10 @@ struct auxv_entry {
 	long val;
 };
 
+#if CONFIG_VDSO
+extern char *vdso_image_addr;
+#endif
+
 #if CONFIG_ARCH_X86_64
 	static const char *auxv_platform = "x86_64";
 #else
@@ -159,6 +163,9 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		{ AT_PHENT, prog->phdr.entsize },
 		{ AT_PHNUM, prog->phdr.num },
 		{ AT_PHDR, prog->start + prog->phdr.off },
+#if CONFIG_VDSO
+		{ AT_SYSINFO_EHDR, (long)vdso_image_addr},
+#endif
 		{ AT_IGNORE, 0x0 }
 	};
 	struct auxv_entry auxv_null = { AT_NULL, 0x0 };

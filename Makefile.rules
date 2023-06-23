@@ -1,0 +1,9 @@
+$(APPELFLOADER_BASE)/vdso/libvdso.o:
+	gcc $(APPELFLOADER_BASE)/vdso/vdso.c -c -o $(APPELFLOADER_BASE)/vdso/libvdso.o -fPIC -O2 -nostdlib
+	@APPELFLOADER_BASE=$(APPELFLOADER_BASE) VDSO_MAGIC_NUMBER=0x369C217100000000 $(APPELFLOADER_BASE)/vdso/add_symbol.sh
+
+$(APPELFLOADER_BASE)/vdso/libvdso.so: $(APPELFLOADER_BASE)/vdso/libvdso.o
+	ld $(APPELFLOADER_BASE)/vdso/libvdso.o -o $(APPELFLOADER_BASE)/vdso/libvdso.so --hash-style=both -soname unikraft-vdso.so.1 -shared -T $(APPELFLOADER_BASE)/vdso/vdso.lds
+
+$(APPELFLOADER_BASE)/vdso/vdso-image.c: $(APPELFLOADER_BASE)/vdso/libvdso.so
+	python3 $(APPELFLOADER_BASE)/vdso/bin2c.py $(APPELFLOADER_BASE)/vdso/vdso_mapping.conf $(APPELFLOADER_BASE)/vdso/libvdso.so $(APPELFLOADER_BASE)/vdso/vdso-image.c
