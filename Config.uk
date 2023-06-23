@@ -100,3 +100,9 @@ config APPELFLOADER_STACK_NBPAGES
 config APPELFLOADER_DEBUG
        bool "Enable debug messages"
        default n
+
+config VDSO
+	bool "Provide VDSO Image"
+	default n
+	help
+		Provide a VDSO image in the kernel, and pass it to the application
