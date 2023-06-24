@@ -59,14 +59,14 @@ if [ -z "$KADDR_ukplat_monotonic_clock" ] || [ -z "$KADDR_ukplat_wall_clock" ]; 
     exit 1
 fi
 
-compile_args="-Wl,-soname unikraft-vdso.so.1 -shared -fPIC -O2 -nostdlib -Wl,-T vdso.lds -DCONFIG_HZ=$CONFIG_HZ -DKADDR_ukplat_monotonic_clock=0x$KADDR_ukplat_monotonic_clock -DKADDR_ukplat_wall_clock=0x$KADDR_ukplat_wall_clock"
+compile_args="-Wl,--hash-style=both -Wl,-soname unikraft-vdso.so.1 -shared -fPIC -O2 -nostdlib -Wl,-T vdso.lds -DCONFIG_HZ=$CONFIG_HZ -DKADDR_ukplat_monotonic_clock=0x$KADDR_ukplat_monotonic_clock -DKADDR_ukplat_wall_clock=0x$KADDR_ukplat_wall_clock"
 
-gcc *.c -o vdso.so $compile_args
+gcc *.c -o libvdso.so $compile_args
 
-vdso_size=$(stat -c%s vdso.so)
+vdso_size=$(stat -c%s libvdso.so)
 kernel_offset=$(( $vdso_image_vaddr - $segment_vaddr + $segment_off ))
 
-dd if=vdso.so of="$KERNEL_IMAGE_PATH" bs=1 seek=$kernel_offset conv=notrunc
+dd if=libvdso.so of="$KERNEL_IMAGE_PATH" bs=1 seek=$kernel_offset conv=notrunc
 
 echo "Rewrite success"
 
