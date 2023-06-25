@@ -88,6 +88,9 @@ VERSION {
 		__vdso_clock_getres;
 		getcpu;
 		__vdso_getcpu;
+
+		uk_vdso_syscall_getpid;
+		uk_vdso_syscall_getppid;
 	local: *;
 	};
 }
