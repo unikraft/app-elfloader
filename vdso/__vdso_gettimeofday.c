@@ -8,7 +8,7 @@ struct timeval {
 	suseconds_t tv_usec;
 };
 
-typedef unsigned int __nsec;
+typedef unsigned long __nsec;
 
 extern __nsec (*ukplat_wall_clock)(void);
 

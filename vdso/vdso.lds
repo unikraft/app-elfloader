@@ -78,19 +78,7 @@ PHDRS
 VERSION {
 	LINUX_2.6 {
 	global:
-		clock_gettime;
-		__vdso_clock_gettime;
-		gettimeofday;
-		__vdso_gettimeofday;
-		time;
-		__vdso_time;
-		clock_getres;
-		__vdso_clock_getres;
-		getcpu;
-		__vdso_getcpu;
-
-		uk_vdso_syscall_getpid;
-		uk_vdso_syscall_getppid;
+		__kernel_vsyscall;
 	local: *;
 	};
 }

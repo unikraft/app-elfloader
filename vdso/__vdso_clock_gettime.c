@@ -10,7 +10,7 @@ struct timespec {
 };
 
 typedef signed   int     __s64;
-typedef unsigned int     __u64;
+typedef unsigned long     __u64;
 
 typedef __u64 __nsec;
 typedef __s64 __snsec;
