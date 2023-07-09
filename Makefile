@@ -4,8 +4,8 @@ WITH_TLSF       ?= n
 WITH_MUSL       ?= n
 WITH_NEWLIB     ?= n
 
-UK_ROOT  ?= $(PWD)/../../unikraft
-UK_LIBS  ?= $(PWD)/../../libs
+UK_ROOT  ?= $(PWD)/.unikraft/unikraft
+UK_LIBS  ?= $(PWD)/.unikraft/libs
 UK_PLATS ?= $(PWD)/../../plats
 
 LIBS-y                  := $(UK_LIBS)/libelf
