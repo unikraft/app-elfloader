@@ -89,7 +89,7 @@ struct auxv_entry {
 };
 
 #if CONFIG_VDSO
-const unsigned char vdso_image[CONFIG_VDSO_IMAGE_SIZE] __attribute__((aligned(4096))) = {};
+extern char* vdso_image_addr;
 #endif
 
 #if CONFIG_ARCH_X86_64
@@ -164,7 +164,7 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		{ AT_PHNUM, prog->phdr.num },
 		{ AT_PHDR, prog->start + prog->phdr.off },
 #if CONFIG_VDSO
-		{ AT_SYSINFO_EHDR, (long)&vdso_image},
+		{ AT_SYSINFO_EHDR, (long)vdso_image_addr},
 #endif
 		{ AT_IGNORE, 0x0 }
 	};
