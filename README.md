@@ -1,28 +1,242 @@
 # Unikraft ELF Loader
 
-## Building the ELF Loader unikernel
+## Quick Setup (aka TLDR)
 
-`elfloader` can be built using the provided `Makefile`.
+For a quick setup, run the commands below.
+Note that you still need to install the [requirements](#requirements).
 
-Make sure the source code for [Unikraft](https://github.com/unikraft/unikraft), [libelf](https://github.com/unikraft/lib-libelf) and [lwip](https://github.com/unikraft/lib-lwip) is available at the paths referenced by the `UK_ROOT` and `UK_LIBS` Makefile variables, respectively.
-Execute the `make menuconfig` command to enter the configuration dialog:
+For building and running everything, follow the steps below.
+We will use the system `ls` command for running, and we will assume it is located at `/usr/bin/ls`
 
-1. Ensure paging is enabled: `Platform Configuration -> Platform Interface Options -> Virtual memory API`,
-2. select a target platform (e.g. `KVM`),
-3. in case of `KVM`, enable `Virtio PCI device support` under `Platform Configuration -> KVM Guest -> Virtio`,
-4. under `Library Configuration -> vfscore: Configuration` choose `Automatically mount a root filesystem`, you can choose between `InitRD` and `9PFS`.
-5. This manual assumes that if you selected `9PFS`, `Default root device` is configured with `fs0`.
-6. You can enable more libraries to extend the range of supported applications. For example: `posix-environ`, `posix-event`, `posix-futex`, `posix-socket`, `lwip`
+```console
+git clone https://github.com/unikraft/app-elfloader/
+cd app-elfloader/
+git clone https://github.com/unikraft/unikraft .unikraft/unikraft
+git clone https://github.com/unikraft/lib-lwip .unikraft/libs/lwip
+git clone https://github.com/unikraft/lib-libelf .unikraft/libs/libelf
+UK_DEFCONFIG=$(pwd)/.config.elfloader_qemu-x86_64 make defconfig
+make -j $(nproc)
+sudo /usr/bin/qemu-system-x86_64 \
+    -fsdev local,id=myid,path="/",security_model=none \
+    -device virtio-9p-pci,fsdev=myid,mount_tag=fs0,disable-modern=on,disable-legacy=off \
+    -kernel build/elfloader_qemu-x86_64 -nographic \
+    -enable-kvm -cpu host \
+    -append /bin/ls
+```
 
-Afterwards exit the configuration dialog and save your configuration.
-Executing `make` a second time triggers a build of the unikernel.
-The resulting artifacts are available inside the `build/` directory (e.g. `build/app-elfloader_kvm-x86_64`).
+This will configure and build the `app-elfloader`.
+After that, it will run the `/bin/ls` `ELF` file on top of the `elfloader` image:
 
-Under `example/helloworld` you can find an example application that you can use with the ELF Loader app.
-Just type `make` to compile it.
-Please note that this compiles two executables: a statically-linked application and a dynamically-linked one.
+```text
+SeaBIOS (version rel-1.16.2-0-gea1b7a073390-prebuilt.qemu.org)
 
-Please refer to [Getting Started with Unikraft](https://unikraft.org/docs/getting-started/) for further details about the Unikraft build process and the available configuration options.
+iPXE (http://ipxe.org) 00:03.0 CA00 PCI2.10 PnP PMM+06FD0FC0+06F30FC0 CA00
+
+Booting from ROM..Powered by
+o.   .o       _ _               __ _
+Oo   Oo  ___ (_) | __ __  __ _ ' _) :_
+oO   oO ' _ `| | |/ /  _)' _` | |_|  _)
+oOo oOO| | | | |   (| | | (_) |  _) :_
+ OoOoO ._, ._:_:_,\_._,  .__,_:_, \___)
+                  Atlas 0.13.1~21ce1acf
+bin  boot  cdrom  dev  etc  home  lib  lib32  lib64  libx32  lost+found  media  mnt  opt  proc  root  run  sbin  snap  srv  sys  tmp  usr  var
+```
+
+Information about every step is detailed below.
+
+## Requirements
+
+In order to set up, configure, build and run `app-elfloader` on Unikraft, the following packages are required:
+
+* `build-essential` / `base-devel` / `@development-tools` (the meta-package that includes `make`, `gcc` and other development-related packages)
+* `sudo`
+* `flex`
+* `bison`
+* `git`
+* `wget`
+* `uuid-runtime`
+* `qemu-system-x86`
+* `qemu-kvm`
+* `sgabios`
+
+On Ubuntu/Debian or other `apt`-based distributions, run the following command to install the requirements:
+
+```console
+sudo apt install -y --no-install-recommends \
+  build-essential \
+  sudo \
+  libncurses-dev \
+  libyaml-dev \
+  flex \
+  bison \
+  git \
+  wget \
+  uuid-runtime \
+  qemu-kvm \
+  qemu-system-x86 \
+  sgabios
+```
+
+## Set Up
+
+The following repositories are required for `app-elfloader`:
+
+* The application repository (this repository): [`app-elfloader`](https://github.com/unikraft/app-elfloader)
+* The Unikraft core repository: [`unikraft`](https://github.com/unikraft/unikraft)
+* Library repositories:
+  * The networking stack library: [`lib-lwip`](https://github.com/unikraft/lib-lwip)
+  * The `ELF` Tool Chain library: [`lib-libelf`](https://github.com/unikraft/lib-libelf)
+
+Follow the steps below for the setup:
+
+  1. First clone the [`app-elfloader` repository](https://github.com/unikraft/app-elfloader) in the `elfloader/` directory:
+
+     ```console
+     git clone https://github.com/unikraft/app-elfloader elfloader
+     ```
+
+     Enter the `elfloader/` directory:
+
+     ```console
+     cd elfloader/
+
+     ls -F
+     ```
+
+     This will show you the contents of the repository:
+
+     ```text
+     arch_prctl.c  brk.c  Config.uk  elf_ctx.c  elf_load.c  elf_prog.h  example/  exportsyms.uk  libelf_helper.h  main.c  Makefile  Makefile.uk  README.md  support/
+     ```
+     ```
+
+  1. While inside the `elfloader/` directory, create the `.unikraft/` directory:
+
+     ```console
+     mkdir .unikraft
+     ```
+
+     Enter the `.unikraft/` directory:
+
+     ```console
+     cd .unikraft/
+     ```
+
+  1. While inside the `.unikraft` directory, clone the [`unikraft` repository](https://github.com/unikraft/unikraft):
+
+     ```console
+     git clone https://github.com/unikraft/unikraft unikraft
+     ```
+
+  1. While inside the `.unikraft/` directory, create the `libs/` directory:
+
+     ```console
+     mkdir libs
+     ```
+
+  1. While inside the `.unikraft/` directory, clone the library repositories in the `libs/` directory:
+
+     ```console
+     git clone https://github.com/unikraft/lib-lwip libs/lwip
+
+     git clone https://github.com/unikraft/lib-libelf libs/libelf
+     ```
+
+  1. Get back to the application directory:
+
+     ```console
+     cd ../
+     ```
+
+     Use the `tree` command to inspect the contents of the `.unikraft/` directory.
+     It should print something like this:
+
+     ```console
+     tree -F -L 2 .unikraft/
+     ```
+
+     The layout of the `.unikraft/` directory should look something like this:
+
+     ```text
+     .unikraft/
+     |-- libs/
+     |   |-- lwip/
+     |   |-- libelf/
+     `-- unikraft/
+         |-- arch/
+         |-- Config.uk
+         |-- CONTRIBUTING.md
+         |-- COPYING.md
+         |-- include/
+         |-- lib/
+         |-- Makefile
+         |-- Makefile.uk
+         |-- plat/
+         |-- README.md
+         |-- support/
+         `-- version.mk
+
+     9 directories, 7 files
+     ```
+
+## Configure
+
+Configuring, building and running a Unikraft application depends on our choice of platform and architecture.
+Currently, supported platform and architecture for `app-elfloader` are QEMU (KVM), x86_64.
+Use the `.config.elfloader_qemu-x86_64` configuration file together with `make defconfig` to create the configuration file:
+
+```console
+UK_DEFCONFIG=$(pwd)/.config.elfloader_qemu-x86_64 make defconfig
+```
+
+This results in the creation of the `.config` file:
+
+```console
+ls .config
+.config
+```
+
+The `.config` file will be used in the build step.
+
+## Build
+
+Building uses as input the `.config` file from above, and results in a unikernel image as output.
+The unikernel output image, together with intermediary build files, are stored in the `build/` directory.
+
+### Clean Up
+
+Before building after some changes had been made, you may need to clean up the build output.
+
+Cleaning up is done with 3 possible commands:
+
+* `make clean`: cleans all actual build output files (binary files, including the unikernel image)
+* `make properclean`: removes the entire `build/` directory
+* `make distclean`: removes the entire `build/` directory **and** the `.config` file
+
+Typically, you would use `make properclean` to remove all build artifacts, but keep the configuration file.
+
+### QEMU x86_64
+
+Building for QEMU x86_64 assumes you did the QEMU x86_64 configuration step above.
+Build the Unikraft elfloader image for QEMU x86_64 by using the command below:
+
+```console
+make -j $(nproc)
+```
+
+You can see a list of all the files processed by the build system:
+
+```text
+[...]
+  LD      elfloader_qemu-x86_64.dbg
+  UKBI    elfloader_qemu-x86_64.dbg.bootinfo
+  SCSTRIP elfloader_qemu-x86_64
+  GZ      elfloader_qemu-x86_64.gz
+make[1]: Leaving directory '/tmp/apps/app-elfloader/.unikraft/unikraft'
+```
+
+At the end of the build command, the `elfloader_qemu-x86_64` unikernel image is generated.
+This image is to be used in the run step.
 
 ## Executing ELF binaries
 
