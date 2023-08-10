@@ -41,6 +41,8 @@
  * (see file /LICENSE in the HermiTux Kernel repository).
  */
 
+#include <uk/config.h>
+
 #include <libelf.h>
 #include <gelf.h>
 #include <errno.h>
