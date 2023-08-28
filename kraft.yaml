@@ -1,0 +1,49 @@
+---
+specification: '0.5'
+name: elfloader
+unikraft:
+  version: stable
+  kconfig:
+    - CONFIG_LIBUKLIBPARAM=y
+    - CONFIG_LIBNOLIBC=y
+    - CONFIG_LIBNOLIBC_UKDEBUG_ASSERT=y
+    - CONFIG_LIBPOSIX_EVENT=y
+    - CONFIG_LIBPOSIX_FUTEX=y
+    - CONFIG_LIBPOSIX_MMAP=y
+    - CONFIG_LIBPOSIX_PROCESS=y
+    - CONFIG_LIBPOSIX_PROCESS_PIDS=y
+    - CONFIG_LIBPOSIX_PROCESS_MAX_PID=31
+    - CONFIG_LIBPOSIX_PROCESS_CLONE=y
+    - CONFIG_LIBPOSIX_SOCKET=y
+    - CONFIG_LIBPOSIX_SYSINFO=y
+    - CONFIG_LIBPOSIX_TIME=y
+    - CONFIG_LIBPOSIX_USER=y
+    - CONFIG_LIBUKSIGNAL=y
+    - CONFIG_LIBSYSCALL_SHIM=y
+targets:
+  - name: elfloader-qemu-x86_64-initrd
+    architecture: x86_64
+    platform: qemu
+    kconfig:
+      - CONFIG_PLAT_KVM=y
+      - CONFIG_LIBVFSCORE_AUTOMOUNT_ROOTFS=y
+      - CONFIG_LIBVFSCORE_ROOTFS_INITRD=y
+      - CONFIG_LIBVFSCORE_ROOTFS="initrd"
+      - CONFIG_APPELFLOADER_VFSEXEC_EXECBIT=n
+  - name: elfloader-fc-x86_64-initrd
+    architecture: x86_64
+    platform: firecracker
+    kconfig:
+      - CONFIG_PLAT_KVM=y
+      - CONFIG_KVM_BOOT_PROTO_LXBOOT=y
+      - CONFIG_KVM_VMM_FIRECRACKER=y
+      - CONFIG_LIBVFSCORE_AUTOMOUNT_ROOTFS=y
+      - CONFIG_LIBVFSCORE_ROOTFS_INITRD=y
+      - CONFIG_LIBVFSCORE_ROOTFS="initrd"
+      - CONFIG_VIRTIO_BUS=y
+      - CONFIG_APPELFLOADER_VFSEXEC_EXECBIT=n
+libraries:
+  lwip:
+    version: stable
+  libelf:
+    version: stable
