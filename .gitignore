@@ -1,4 +1,5 @@
-build/
-.config
-.unikraft/
+/build/
+/.config
+/.config.*
+/.unikraft/
 /workdir/
