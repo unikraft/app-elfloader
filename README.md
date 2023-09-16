@@ -9,17 +9,17 @@ For building and running everything, follow the steps below.
 We will use the system `ls` command for running, and we will assume it is located at `/usr/bin/ls`
 
 ```console
-git clone https://github.com/unikraft/app-elfloader/
-cd app-elfloader/
+git clone https://github.com/unikraft/app-elfloader elfloader
+cd elfloader/
 git clone https://github.com/unikraft/unikraft workdir/unikraft
 git clone https://github.com/unikraft/lib-lwip workdir/libs/lwip
 git clone https://github.com/unikraft/lib-libelf workdir/libs/libelf
-UK_DEFCONFIG=$(pwd)/.config.elfloader_qemu-x86_64 make defconfig
+UK_DEFCONFIG=$(pwd)/defconfigs/qemu-x86_64-9pfs make defconfig
 make -j $(nproc)
-sudo /usr/bin/qemu-system-x86_64 \
+qemu-system-x86_64 \
     -fsdev local,id=myid,path="/",security_model=none \
-    -device virtio-9p-pci,fsdev=myid,mount_tag=fs0,disable-modern=on,disable-legacy=off \
-    -kernel build/elfloader_qemu-x86_64 -nographic \
+    -device virtio-9p-pci,fsdev=myid,mount_tag=fs1,disable-modern=on,disable-legacy=off \
+    -kernel workdir/build/elfloader_qemu-x86_64 -nographic \
     -enable-kvm -cpu host \
     -append /bin/ls
 ```
@@ -42,7 +42,8 @@ oOo oOO| | | | |   (| | | (_) |  _) :_
 bin  boot  cdrom  dev  etc  home  lib  lib32  lib64  libx32  lost+found  media  mnt  opt  proc  root  run  sbin  snap  srv  sys  tmp  usr  var
 ```
 
-Information about every step is detailed below.
+**Note**: Close the linger QEMU VM by using `Ctrl+a x`.
+That is, press `Ctrl` and `a` at the same time, and then, separately, `x`.
 
 ## Requirements
 
@@ -107,7 +108,6 @@ Follow the steps below for the setup:
 
      ```text
      arch_prctl.c  brk.c  Config.uk  elf_ctx.c  elf_load.c  elf_prog.h  example/  exportsyms.uk  libelf_helper.h  main.c  Makefile  Makefile.uk  README.md  support/
-     ```
      ```
 
   1. While inside the `elfloader/` directory, create the `workdir/` directory:
@@ -179,7 +179,63 @@ Follow the steps below for the setup:
      9 directories, 7 files
      ```
 
-## Configure
+## Scripted Building and Running
+
+To make it easier build and run and test different configurations, the repository provides a set of scripts that do everything required.
+These are scripts used for building different configurations of the ELF Loader and for running these with all the requirements behind the scenes: creating network configurations, setting up archives etc.
+
+First, generate these scripts by running the `generate.py` script while on the `elfloader` directory:
+
+```console
+./scripts/generate.py
+```
+
+The scripts (as shell scripts) are now generated in `scripts/build/` and `scripts/run/`:
+
+```text
+scripts/build/:
+kraft-fc-x86_64-initrd-debug.sh*   kraft-qemu-x86_64-9pfs-debug.sh*   kraft-qemu-x86_64-initrd-debug.sh*   make-fc-x86_64-initrd-debug.sh*   make-qemu-x86_64-9pfs-debug.sh*   make-qemu-x86_64-initrd-debug.sh*
+kraft-fc-x86_64-initrd.sh*         kraft-qemu-x86_64-9pfs.sh*         kraft-qemu-x86_64-initrd.sh*         make-fc-x86_64-initrd.sh*         make-qemu-x86_64-9pfs.sh*         make-qemu-x86_64-initrd.sh*
+kraft-fc-x86_64-initrd-strace.sh*  kraft-qemu-x86_64-9pfs-strace.sh*  kraft-qemu-x86_64-initrd-strace.sh*  make-fc-x86_64-initrd-strace.sh*  make-qemu-x86_64-9pfs-strace.sh*  make-qemu-x86_64-initrd-strace.sh*
+
+scripts/run:
+fc-x86_64-initrd-helloworld-c.json             kraft-fc-x86_64-initrd-helloworld-c.sh*         kraft-qemu-x86_64-9pfs-helloworld-c.sh*          kraft-qemu-x86_64-initrd-helloworld-c.sh*         qemu-x86_64-initrd-helloworld-c.sh*
+fc-x86_64-initrd-helloworld-c.sh*              kraft-fc-x86_64-initrd-nginx.sh*                kraft-qemu-x86_64-9pfs-nginx.sh*                 kraft-qemu-x86_64-initrd-nginx.sh*                qemu-x86_64-initrd-nginx.sh*
+fc-x86_64-initrd-nginx.json                    kraft-fc-x86_64-initrd-strace-helloworld-c.sh*  kraft-qemu-x86_64-9pfs-strace-helloworld-c.sh*   kraft-qemu-x86_64-initrd-strace-helloworld-c.sh*
+fc-x86_64-initrd-nginx.sh*                     kraft-fc-x86_64-initrd-strace-nginx.sh*         kraft-qemu-x86_64-9pfs-strace-nginx.sh*          kraft-qemu-x86_64-initrd-strace-nginx.sh*
+kraft-fc-x86_64-initrd-debug-helloworld-c.sh*  kraft-qemu-x86_64-9pfs-debug-helloworld-c.sh*   kraft-qemu-x86_64-initrd-debug-helloworld-c.sh*  qemu-x86_64-9pfs-helloworld-c.sh*
+kraft-fc-x86_64-initrd-debug-nginx.sh*         kraft-qemu-x86_64-9pfs-debug-nginx.sh*          kraft-qemu-x86_64-initrd-debug-nginx.sh*         qemu-x86_64-9pfs-nginx.sh*
+```
+
+They are shell scripts, so you can use an editor or a text viewer to check their contents:
+
+```console
+cat scripts/run/kraft-fc-x86_64-initrd-helloworld-c.sh
+```
+
+Now, invoke each script to build and run ELF loader.
+A sample build and run set of commands is:
+
+```console
+./scripts/build/kraft-qemu-x86_64-9pfs-strace.sh
+./scripts/run/kraft-qemu-x86_64-9pfs-strace-helloworld-c.sh
+./scripts/run/kraft-qemu-x86_64-9pfs-strace-nginx.sh
+```
+
+Another one is:
+
+```console
+./scripts/build/make-qemu-x86_64-initrd.sh
+./scripts/run/qemu-x86_64-initrd-helloworld-c.sh
+./scripts/run/qemu-x86_64-initrd-nginx.sh
+```
+
+Note that Firecracker only works with initrd (not 9pfs).
+And Firecracker networking is not yet upstream.
+
+## Detailed Steps
+
+### Configure
 
 Configuring, building and running a Unikraft application depends on our choice of platform and architecture.
 Currently, supported platform and architecture for `app-elfloader` are QEMU (KVM), x86_64.
@@ -198,12 +254,12 @@ ls .config
 
 The `.config` file will be used in the build step.
 
-## Build
+### Build
 
 Building uses as input the `.config` file from above, and results in a unikernel image as output.
 The unikernel output image, together with intermediary build files, are stored in the `build/` directory.
 
-### Clean Up
+#### Clean Up
 
 Before building after some changes had been made, you may need to clean up the build output.
 
@@ -215,7 +271,7 @@ Cleaning up is done with 3 possible commands:
 
 Typically, you would use `make properclean` to remove all build artifacts, but keep the configuration file.
 
-### QEMU x86_64
+#### QEMU x86_64
 
 Building for QEMU x86_64 assumes you did the QEMU x86_64 configuration step above.
 Build the Unikraft elfloader image for QEMU x86_64 by using the command below:

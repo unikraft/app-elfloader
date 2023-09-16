@@ -1,0 +1,11 @@
+runs:
+  - name: nginx
+    rootfs: ../dynamic-apps/nginx
+    command: /usr/local/nginx/sbin/nginx -c /usr/local/nginx/conf/nginx.conf
+    memory: 64
+    networking: True
+  - name: helloworld-c
+    rootfs: ../dynamic-apps/lang/c/helloworld
+    command: /helloworld
+    memory: 64
+    networking: False
