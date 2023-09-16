@@ -11,9 +11,9 @@ We will use the system `ls` command for running, and we will assume it is locate
 ```console
 git clone https://github.com/unikraft/app-elfloader/
 cd app-elfloader/
-git clone https://github.com/unikraft/unikraft .unikraft/unikraft
-git clone https://github.com/unikraft/lib-lwip .unikraft/libs/lwip
-git clone https://github.com/unikraft/lib-libelf .unikraft/libs/libelf
+git clone https://github.com/unikraft/unikraft workdir/unikraft
+git clone https://github.com/unikraft/lib-lwip workdir/libs/lwip
+git clone https://github.com/unikraft/lib-libelf workdir/libs/libelf
 UK_DEFCONFIG=$(pwd)/.config.elfloader_qemu-x86_64 make defconfig
 make -j $(nproc)
 sudo /usr/bin/qemu-system-x86_64 \
@@ -110,31 +110,31 @@ Follow the steps below for the setup:
      ```
      ```
 
-  1. While inside the `elfloader/` directory, create the `.unikraft/` directory:
+  1. While inside the `elfloader/` directory, create the `workdir/` directory:
 
      ```console
-     mkdir .unikraft
+     mkdir workdir
      ```
 
-     Enter the `.unikraft/` directory:
+     Enter the `workdir/` directory:
 
      ```console
-     cd .unikraft/
+     cd workdir/
      ```
 
-  1. While inside the `.unikraft` directory, clone the [`unikraft` repository](https://github.com/unikraft/unikraft):
+  1. While inside the `workdir` directory, clone the [`unikraft` repository](https://github.com/unikraft/unikraft):
 
      ```console
      git clone https://github.com/unikraft/unikraft unikraft
      ```
 
-  1. While inside the `.unikraft/` directory, create the `libs/` directory:
+  1. While inside the `workdir/` directory, create the `libs/` directory:
 
      ```console
      mkdir libs
      ```
 
-  1. While inside the `.unikraft/` directory, clone the library repositories in the `libs/` directory:
+  1. While inside the `workdir/` directory, clone the library repositories in the `libs/` directory:
 
      ```console
      git clone https://github.com/unikraft/lib-lwip libs/lwip
@@ -148,17 +148,17 @@ Follow the steps below for the setup:
      cd ../
      ```
 
-     Use the `tree` command to inspect the contents of the `.unikraft/` directory.
+     Use the `tree` command to inspect the contents of the `workdir/` directory.
      It should print something like this:
 
      ```console
-     tree -F -L 2 .unikraft/
+     tree -F -L 2 workdir/
      ```
 
-     The layout of the `.unikraft/` directory should look something like this:
+     The layout of the `workdir/` directory should look something like this:
 
      ```text
-     .unikraft/
+     workdir/
      |-- libs/
      |   |-- lwip/
      |   |-- libelf/
@@ -232,7 +232,7 @@ You can see a list of all the files processed by the build system:
   UKBI    elfloader_qemu-x86_64.dbg.bootinfo
   SCSTRIP elfloader_qemu-x86_64
   GZ      elfloader_qemu-x86_64.gz
-make[1]: Leaving directory '/tmp/apps/app-elfloader/.unikraft/unikraft'
+make[1]: Leaving directory '/tmp/apps/app-elfloader/workdir/unikraft'
 ```
 
 At the end of the build command, the `elfloader_qemu-x86_64` unikernel image is generated.
