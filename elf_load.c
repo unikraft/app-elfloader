@@ -62,6 +62,7 @@
 #include <uk/vmem.h>
 #include <uk/arch/limits.h>
 #endif /* CONFIG_LIBUKVMEM */
+#include <sys/mman.h>
 
 #include "libelf_helper.h"
 #include "elf_prog.h"
@@ -75,8 +76,6 @@ static int elf_load_parse(struct elf_prog *elf_prog, Elf *elf)
 	GElf_Ehdr ehdr;
 	GElf_Phdr phdr;
 	size_t phi;
-	uintptr_t prog_lowerl;
-	uintptr_t prog_upperl;
 	int ret;
 
 	UK_ASSERT(elf_prog);
@@ -144,8 +143,6 @@ static int elf_load_parse(struct elf_prog *elf_prog, Elf *elf)
 	 * While checking for compatible headers, we are also figuring out
 	 * how much virtual memory needs to be reserved for loading the program.
 	 */
-	prog_lowerl = 0;
-	prog_upperl = 0;
 	for (phi = 0; phi < ehdr.e_phnum; ++phi) {
 		if (gelf_getphdr(elf, phi, &phdr) != &phdr) {
 			elferr_warn("%s: Failed to get program header %"PRIu64"\n",
@@ -189,24 +186,24 @@ static int elf_load_parse(struct elf_prog *elf_prog, Elf *elf)
 			    elf_prog->name, phdr.p_paddr, phdr.p_memsz,
 			    (uint64_t) phdr.p_offset, (uint64_t) phdr.p_filesz);
 
-		if (prog_lowerl == 0 && prog_upperl == 0) {
+		if (elf_prog->lowerl == 0 && elf_prog->upperl == 0) {
 			/* first run */
-			prog_lowerl = phdr.p_paddr;
-			prog_upperl = prog_lowerl + phdr.p_memsz;
+			elf_prog->lowerl = phdr.p_paddr;
+			elf_prog->upperl = elf_prog->lowerl + phdr.p_memsz;
 		} else {
 			/* Move lower and upper border */
-			if (phdr.p_paddr < prog_lowerl)
-				prog_lowerl = phdr.p_paddr;
-			if (phdr.p_paddr + phdr.p_memsz > prog_upperl)
-				prog_upperl = phdr.p_paddr + phdr.p_memsz;
+			if (phdr.p_paddr < elf_prog->lowerl)
+				elf_prog->lowerl = phdr.p_paddr;
+			if (phdr.p_paddr + phdr.p_memsz > elf_prog->upperl)
+				elf_prog->upperl = phdr.p_paddr + phdr.p_memsz;
 		}
-		UK_ASSERT(prog_lowerl <= prog_upperl);
+		UK_ASSERT(elf_prog->lowerl <= elf_prog->upperl);
 	}
 	uk_pr_debug("%s: base: pie + 0x%"PRIx64", len: 0x%"PRIx64"\n",
-		    elf_prog->name, prog_lowerl, prog_upperl - prog_lowerl);
+		    elf_prog->name, elf_prog->lowerl, elf_prog->upperl - elf_prog->lowerl);
 
 	/* We do not support yet an img base other than 0 */
-	if (unlikely(prog_lowerl != 0)) {
+	if (unlikely(elf_prog->lowerl != 0)) {
 		elferr_err("%s: Image base is not 0x0, unsupported\n",
 			   elf_prog->name);
 		ret = -ENOEXEC;
@@ -216,13 +213,29 @@ static int elf_load_parse(struct elf_prog *elf_prog, Elf *elf)
 	elf_prog->phdr.off = ehdr.e_phoff;
 	elf_prog->phdr.num = ehdr.e_phnum;
 	elf_prog->phdr.entsize = ehdr.e_phentsize;
-	elf_prog->valen = PAGE_ALIGN_UP(prog_upperl - prog_lowerl);
+	elf_prog->valen = PAGE_ALIGN_UP(elf_prog->upperl);
 	return 0;
 
 err_out:
 	return ret;
 }
 
+#if CONFIG_LIBPOSIX_MMAP
+static void elf_unload_vaimg(struct elf_prog *elf_prog)
+{
+	int rc;
+
+	if (elf_prog->vabase) {
+		rc = munmap(elf_prog->vabase, elf_prog->valen);
+		if (unlikely(rc))
+			uk_pr_err("Failed to munmap %s\n", elf_prog->name);
+
+		elf_prog->vabase = NULL;
+		elf_prog->start = 0;
+		elf_prog->entry = 0;
+	}
+}
+#else /* !CONFIG_LIBPOSIX_MMAP */
 static void elf_unload_vaimg(struct elf_prog *elf_prog)
 {
 	if (elf_prog->vabase) {
@@ -232,6 +245,7 @@ static void elf_unload_vaimg(struct elf_prog *elf_prog)
 		elf_prog->entry = 0;
 	}
 }
+#endif /* !CONFIG_LIBPOSIX_MMAP */
 
 static int elf_load_imgcpy(struct elf_prog *elf_prog, Elf *elf,
 			   const void *img_base, size_t img_len __unused)
@@ -317,13 +331,228 @@ err_out:
 }
 
 #if CONFIG_LIBVFSCORE
-/* Read from fd exact `len` bytes from offset `roff`, fail otherwise */
-static int elf_load_do_fdread(int fd, off_t roff, void *dst, size_t len)
+#if CONFIG_LIBPOSIX_MMAP
+/* If vastart + phdr.p_filesz (vastart) < vastart + phdr.p_memsz (vaend),
+ * 0 out that remainder, either through memset or through anonymous mappings
+ */
+static int elf_load_mmap_filesz_memsz_diff(struct elf_prog *elf_prog,
+					   GElf_Phdr *phdr __maybe_unused,
+					   uintptr_t vastart, uintptr_t vaend)
 {
-	char *ptr;
-	ssize_t rc;
+	UK_ASSERT(elf_prog && phdr && vastart && vaend);
 
-	ptr = (char *) dst;
+	uk_pr_debug("%s: Zeroing 0x%"PRIx64" - 0x%"PRIx64"\n",
+		    elf_prog->name,
+		    (uint64_t)(vastart),
+		    (uint64_t)(vaend));
+
+	/* From the last byte contained in filesz to the last
+	 * byte contained in memsz, we can either have:
+	 * 1. a page alignment adjustment, where the end
+	 * address is just PAGE_ALIGN_UP(paddr + filesz), which
+	 * means that our initial call to mmap already read in
+	 * a page for us whose remaining bytes we memset without
+	 * generating a page fault, because
+	 * vaend - vastart < PAGE_SIZE
+	 * ...
+	 */
+	memset((void *)vastart, 0, PAGE_ALIGN_UP(vastart) - vastart);
+
+	if (vaend == PAGE_ALIGN_UP(vastart))
+		return 0;
+
+	/*
+	 * ...
+	 * 2. vaend - vastart >= PAGE_SIZE, which can happen if
+	 * this segment contains a NOBITS section, such as .bss.
+	 * If that is the case, then simply anonymously map this
+	 * remaining area so that we don't waste time memsetting
+	 * it (.bss is quite large).
+	 */
+	vastart = PAGE_ALIGN_UP(vastart);
+	vastart = (uintptr_t)mmap((void *)vastart, vaend - vastart,
+				  PROT_EXEC | PROT_READ | PROT_WRITE,
+				  MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS,
+				  -1, 0);
+	if (unlikely(vastart == (uintptr_t)MAP_FAILED)) {
+		uk_pr_err("Failed to mmap the NOBITS part of phdr at "
+			  "offset %lu\n", phdr->p_offset);
+		return (int)vastart;
+	}
+
+	return 0;
+}
+
+/* Use this to mmap first PT_LOAD */
+static int do_elf_load_fdphdr_0(struct elf_prog *elf_prog,
+				GElf_Phdr *phdr, int fd)
+{
+	uintptr_t vastart_old, vastart_aligned;
+	uintptr_t vaend_old, vaend_new;
+	uintptr_t vastart, vaend;
+	__sz mmap_len;
+	int rc;
+
+	/* First start/vabase can't be !0 before loading first PT_LOAD */
+	UK_ASSERT(!elf_prog->start && !elf_prog->vabase && phdr);
+	/* PT_LOAD p_vaddr/p_paddr must be multiple of page size */
+	UK_ASSERT(!(phdr->p_vaddr & (phdr->p_align - 1)));
+	UK_ASSERT(!(phdr->p_paddr & (phdr->p_align - 1)));
+
+	mmap_len = elf_prog->valen + elf_prog->align;
+
+	vastart = (uintptr_t)mmap(NULL, mmap_len,
+				  PROT_EXEC | PROT_READ | PROT_WRITE,
+				  MAP_PRIVATE,
+				  fd, phdr->p_offset);
+	if (unlikely(vastart == (uintptr_t)MAP_FAILED)) {
+		uk_pr_err("Failed to mmap the phdr at offset %lu\n",
+			  phdr->p_offset);
+		return (int)vastart;
+	}
+
+	vastart_aligned = ALIGN_UP(vastart, elf_prog->align);
+	vastart_old = vastart;
+
+	/* Force remap with MAP_FIXED */
+	if (vastart_aligned != vastart) {
+		vastart = (uintptr_t)mmap((void *)vastart_aligned,
+					  phdr->p_filesz,
+					  PROT_EXEC | PROT_READ | PROT_WRITE,
+					  MAP_PRIVATE | MAP_FIXED,
+					  fd, phdr->p_offset);
+		if (unlikely(vastart == (uintptr_t)MAP_FAILED)) {
+			uk_pr_err("Failed to mmap the phdr at offset %lu\n",
+				  phdr->p_offset);
+			return (int)vastart;
+		}
+
+		rc = munmap((void *)vastart_old, vastart - vastart_old);
+		if (unlikely(rc)) {
+			uk_pr_err("Failed to unmap [vastart_old, vastart)\n");
+			return rc;
+		}
+	}
+
+	uk_pr_debug("%s: Memory mapped 0x%"PRIx64" - 0x%"PRIx64" to 0x%"PRIx64" - 0x%"PRIx64"\n",
+		    elf_prog->name,
+		    (uint64_t)phdr->p_offset,
+		    (uint64_t)phdr->p_offset + phdr->p_filesz,
+		    (uint64_t)vastart,
+		    (uint64_t)vastart + (uint64_t)phdr->p_filesz);
+
+	vaend_old = PAGE_ALIGN_UP(vastart_old + mmap_len);
+	vaend_new = PAGE_ALIGN_UP(vastart + phdr->p_filesz);
+	if (vaend_old - vaend_new) {
+		rc = munmap((void *)vaend_new, vaend_old - vaend_new);
+		if (unlikely(rc)) {
+			uk_pr_err("Failed to unmap [vaend_new, vaend_old)\n");
+			return rc;
+		}
+	}
+
+	elf_prog->start = vastart;
+	elf_prog->vabase = (void *)vastart;
+	/* We got ehdr.e_entry added initially at the start of elf_load_fd() */
+	elf_prog->entry += (uintptr_t)elf_prog->vabase;
+
+	uk_pr_debug("%s: Program/Library memory region: 0x%"PRIx64"-0x%"PRIx64"\n",
+		    elf_prog->name,
+		    (uint64_t)elf_prog->vabase,
+		    (uint64_t)elf_prog->vabase + elf_prog->valen);
+
+	/* mmap anonymously what we are left if memsz > filesz */
+	vastart = vastart + phdr->p_filesz;
+	vaend = PAGE_ALIGN_UP(vastart + (phdr->p_memsz - phdr->p_filesz));
+	if (vaend > vastart) {
+		rc = elf_load_mmap_filesz_memsz_diff(elf_prog, phdr,
+						     vastart, vaend);
+		if (unlikely(rc)) {
+			uk_pr_err("Failed to map difference between filesz and "
+				  "memsz\n");
+			return rc;
+		}
+	}
+
+	return 0;
+}
+
+/* Use this to mmap every PT_LOAD but the first one */
+static int do_elf_load_fdphdr_not0(struct elf_prog *elf_prog,
+				   GElf_Phdr *phdr, int fd)
+{
+	uintptr_t vastart, vaend;
+	uint64_t delta_p_offset;
+	void *addr;
+	int rc;
+
+	/* If this is not the first PT_LOAD then vabase/start must be != 0 */
+	UK_ASSERT(elf_prog->vabase && elf_prog->start && phdr);
+
+	/* PT_LOAD's paddr may be misaligned, so keep in mind the
+	 * offset from what should have been the aligned paddr to
+	 * what we ended up with.
+	 * As per ELF spec, the file offset and virtual/physical address
+	 * are congruent modulo alignment, which must be multiple of page size.
+	 * Therefore, taking care of the address misalignment will also take
+	 * care of the file misalignment.
+	 */
+	delta_p_offset = phdr->p_paddr - PAGE_ALIGN_DOWN(phdr->p_paddr);
+
+	addr = (void *)PAGE_ALIGN_DOWN((phdr->p_paddr +
+				       (uintptr_t)elf_prog->vabase));
+
+	uk_pr_debug("%s: Memory mapping 0x%"PRIx64" - 0x%"PRIx64" to 0x%"PRIx64" - 0x%"PRIx64"\n",
+		    elf_prog->name,
+		    (uint64_t)phdr->p_offset - delta_p_offset,
+		    (uint64_t)phdr->p_offset + phdr->p_filesz + delta_p_offset,
+		    (uint64_t)addr,
+		    (uint64_t)addr + (uint64_t)phdr->p_filesz + delta_p_offset);
+
+	/* mmap with all flags. If protections are enabled, these will
+	 * be manually re-adjusted later.
+	 */
+	vastart = (uintptr_t)mmap(addr, phdr->p_filesz + delta_p_offset,
+				  PROT_EXEC | PROT_READ | PROT_WRITE,
+				  MAP_FIXED | MAP_PRIVATE,
+				  fd, phdr->p_offset - delta_p_offset);
+	if (unlikely(vastart == (uintptr_t)MAP_FAILED)) {
+		uk_pr_err("Failed to mmap the phdr at offset %lu\n",
+			  phdr->p_offset);
+		return (int)vastart;
+	}
+
+	/* mmap anonymously what we are left if memsz > filesz */
+	vastart = vastart + phdr->p_filesz + delta_p_offset;
+	vaend = PAGE_ALIGN_UP(vastart + (phdr->p_memsz - phdr->p_filesz));
+	if (vaend > vastart) {
+		rc = elf_load_mmap_filesz_memsz_diff(elf_prog, phdr,
+						     vastart, vaend);
+		if (unlikely(rc)) {
+			uk_pr_err("Failed to map difference between filesz and "
+				  "memsz\n");
+			return rc;
+		}
+	}
+
+	return 0;
+}
+
+static int elf_load_fdphdr(struct elf_prog *elf_prog, GElf_Phdr *phdr, int fd)
+{
+	if (elf_prog->vabase && elf_prog->start)
+		return do_elf_load_fdphdr_not0(elf_prog, phdr, fd);
+
+	return do_elf_load_fdphdr_0(elf_prog, phdr, fd);
+}
+#else /* !CONFIG_LIBPOSIX_MMAP */
+/* Read from fd exact `len` bytes from offset `roff`, fail otherwise */
+static int elf_load_fdphdr_read(int fd, off_t roff, void *dst, size_t len)
+{
+	ssize_t rc;
+	char *ptr;
+
+	ptr = (char *)dst;
 	while (len) {
 		rc = pread(fd, ptr, len, roff);
 		if (unlikely(rc < 0)) {
@@ -346,13 +575,50 @@ static int elf_load_do_fdread(int fd, off_t roff, void *dst, size_t len)
 	return 0;
 }
 
-static int elf_load_fdread(struct elf_prog *elf_prog, Elf *elf, int fd)
+static int elf_load_fdphdr(struct elf_prog *elf_prog, GElf_Phdr *phdr, int fd)
 {
-	uintptr_t vastart;
-	uintptr_t vaend;
+	uintptr_t vastart, vaend;
+	int ret;
+
+	vastart = phdr->p_paddr + (uintptr_t)elf_prog->vabase;
+	vaend   = vastart + phdr->p_filesz;
+	if (!elf_prog->start || (vastart < elf_prog->start))
+		elf_prog->start = vastart;
+
+	uk_pr_debug("%s: Reading 0x%"PRIx64" - 0x%"PRIx64" to 0x%"PRIx64" - 0x%"PRIx64"\n",
+		    elf_prog->name,
+		    (uint64_t)phdr->p_offset,
+		    (uint64_t)phdr->p_offset + phdr->p_filesz,
+		    (uint64_t)vastart,
+		    (uint64_t)vaend);
+
+	ret = elf_load_fdphdr_read(fd, phdr->p_offset, (void *)vastart,
+				   phdr->p_filesz);
+	if (unlikely(ret < 0)) {
+		uk_pr_err("%s: Read error: %s\n", elf_prog->name,
+			  strerror(-ret));
+		return ret;
+	}
+
+	/* Compute the area that needs to be zeroed */
+	vastart = vaend;
+	vaend = vastart + (phdr->p_memsz - phdr->p_filesz);
+	vaend = PAGE_ALIGN_UP(vaend);
+	uk_pr_debug("%s: Zeroing 0x%"PRIx64" - 0x%"PRIx64"\n",
+		    elf_prog->name,
+		    (uint64_t)(vastart),
+		    (uint64_t)(vaend));
+	memset((void *)(vastart), 0, vaend - vastart);
+
+	return 0;
+}
+#endif /* !CONFIG_LIBPOSIX_MMAP */
+
+static int elf_load_fd(struct elf_prog *elf_prog, Elf *elf, int fd)
+{
+	size_t phnum, phi;
 	GElf_Ehdr ehdr;
 	GElf_Phdr phdr;
-	size_t phnum, phi;
 	int ret = -1;
 
 	UK_ASSERT(elf_prog->align && PAGE_ALIGNED(elf_prog->align));
@@ -364,19 +630,34 @@ static int elf_load_fdread(struct elf_prog *elf_prog, Elf *elf, int fd)
 		goto err_out;
 	}
 
+#if CONFIG_LIBPOSIX_MMAP
+	/* If we use mmap, let `elf_load_fdphdr` decide the vabase depending
+	 * on what mmap returns. For now we simply set it to what the ELF
+	 * header tells us. Ultimately, `elf_load_fdphdr` will update it for
+	 * us with the new address.
+	 */
+	elf_prog->entry = ehdr.e_entry;
+#else /* !CONFIG_LIBPOSIX_MMAP */
 	elf_prog->vabase = uk_memalign(elf_prog->a, elf_prog->align,
 				       elf_prog->valen);
 	if (unlikely(!elf_prog->vabase)) {
 		uk_pr_debug("%s: Not enough memory to load image (failed to allocate %"PRIu64" bytes)\n",
-			    elf_prog->name, (uint64_t) elf_prog->valen);
+			    elf_prog->name, (uint64_t)elf_prog->valen);
 		ret = -ENOMEM;
 		goto err_out;
 	}
 
 	uk_pr_debug("%s: Program/Library memory region: 0x%"PRIx64"-0x%"PRIx64"\n",
 		    elf_prog->name,
-		    (uint64_t) elf_prog->vabase,
-		    (uint64_t) elf_prog->vabase + elf_prog->valen);
+		    (uint64_t)elf_prog->vabase,
+		    (uint64_t)elf_prog->vabase + elf_prog->valen);
+
+	/* Load segments to allocated memory and set start & entry.
+	 * Unlike in the mmap case, here we already know the vabase, so update
+	 * it now.
+	 */
+	elf_prog->entry = (uintptr_t)elf_prog->vabase + ehdr.e_entry;
+#endif /* !CONFIG_LIBPOSIX_MMAP */
 
 	if (unlikely(elf_getphnum(elf, &phnum) == 0)) {
 		elferr_err("%s: Failed to get number of program headers",
@@ -417,8 +698,6 @@ static int elf_load_fdread(struct elf_prog *elf_prog, Elf *elf, int fd)
 		}
 	}
 
-	/* Load segments to allocated memory and set start & entry */
-	elf_prog->entry = (uintptr_t) elf_prog->vabase + ehdr.e_entry;
 	for (phi = 0; phi < phnum; ++phi) {
 		if (gelf_getphdr(elf, phi, &phdr) != &phdr) {
 			elferr_warn("%s: Failed to get program header %"PRIu64"\n",
@@ -428,40 +707,15 @@ static int elf_load_fdread(struct elf_prog *elf_prog, Elf *elf, int fd)
 		if (phdr.p_type != PT_LOAD)
 			continue;
 
-		vastart = phdr.p_paddr + (uintptr_t) elf_prog->vabase;
-		vaend   = vastart + phdr.p_filesz;
-		if (!elf_prog->start || (vastart < elf_prog->start))
-			elf_prog->start = vastart;
-
-		uk_pr_debug("%s: Reading 0x%"PRIx64" - 0x%"PRIx64" to 0x%"PRIx64" - 0x%"PRIx64"\n",
-			    elf_prog->name,
-			    (uint64_t) phdr.p_offset,
-			    (uint64_t) phdr.p_offset + phdr.p_filesz,
-			    (uint64_t) vastart,
-			    (uint64_t) vaend);
-		ret = elf_load_do_fdread(fd, phdr.p_offset, (void *) vastart,
-					 phdr.p_filesz);
-		if (unlikely(ret < 0)) {
-			uk_pr_err("%s: Read error: %s\n", elf_prog->name,
-				  strerror(-ret));
-			goto err_free_img;
-		}
-
-		/* Compute the area that needs to be zeroed */
-		vastart = vaend;
-		vaend   = vastart + (phdr.p_memsz - phdr.p_filesz);
-		vaend   = PAGE_ALIGN_UP(vaend);
-		uk_pr_debug("%s: Zeroing 0x%"PRIx64" - 0x%"PRIx64"\n",
-			    elf_prog->name,
-			    (uint64_t) (vastart),
-			    (uint64_t) (vaend));
-		memset((void *)(vastart), 0, vaend - vastart);
+		ret = elf_load_fdphdr(elf_prog, &phdr, fd);
+		if (unlikely(ret))
+			return ret;
 	}
+
 	return 0;
 
 err_free_img:
 	elf_unload_vaimg(elf_prog);
-err_free_interp:
 	free(elf_prog->interp.path);
 	elf_prog->interp.path = NULL;
 err_out:
@@ -715,7 +969,7 @@ static struct elf_prog *do_elf_load_vfs(struct uk_alloc *a, const char *path,
 		goto err_free_elf_prog;
 	}
 
-	ret = elf_load_fdread(elf_prog, elf, fd);
+	ret = elf_load_fd(elf_prog, elf, fd);
 	if (unlikely(ret < 0)) {
 		uk_pr_err("%s: Failed to copy the executable: %d\n",
 			  progname, ret);
