@@ -396,14 +396,10 @@ static int elf_load_fdread(struct elf_prog *elf_prog, Elf *elf, int fd)
 					  elf_prog->name, strerror(-ret));
 				goto err_out;
 			}
-			ret = elf_load_do_fdread(fd, phdr.p_offset,
-						 elf_prog->interp.path,
-						 phdr.p_filesz);
-			if (ret < 0) {
-				uk_pr_err("%s: Read error: %s\n",
-					  elf_prog->name, strerror(-ret));
-				goto err_free_interp;
-			}
+
+			memcpy(elf_prog->interp.path,
+			       &elf->e_rawfile[phdr.p_offset], phdr.p_filesz);
+
 			/* Enforce zero termination, this should normally
 			 * be the case with the PT_INTERP section content.
 			 * We are playing safe here.
