@@ -1,5 +1,47 @@
 # Unikraft ELF Loader
 
+The ELF Loader is the integral part of the binary compatibility layer, that enables Unikraft to run unmodified Linux applications.
+Linux binaries (ELFS - **Executable and Linking Format**) are loaded by the ELF Loader, and then control is passed to them binary.
+
+Follow the instructions below to set up, configure, build and run ELF Loader.
+
+To get started immediately, you can use Unikraft's companion command-line companion tool, [`kraft`](https://github.com/unikraft/kraftkit).
+Start by running the interactive installer:
+
+```console
+curl --proto '=https' --tlsv1.2 -sSf https://get.kraftkit.sh | sudo sh
+```
+
+Once installed, clone [this repository](https://github.com/unikraft/app-elfloader) and run `kraft build`:
+
+```console
+git clone https://github.com/unikraft/app-elfloader elfloader
+cd elfloader/
+kraft build
+```
+
+This will guide you through an interactive build process where you can select one of the available targets (architecture/platform combinations).
+Otherwise, we recommend the `elfloader-qemu-x86_64-initrd-strace` target:
+
+```console
+kraft build --target elfloader-qemu-x86_64-initrd-strace
+```
+
+Once built, you can instantiate the unikernel to run an existing dynamic executable.
+For that, clone the catalog of dynamic applications from [the `dynamic-apps` repository](https://github.com/unikraft/dynamic-apps), in the same directory where you cloned `app-elfloader`:
+
+```console
+git clone https://github.com/unikraft/dynamic-apps
+```
+
+Run a simple `helloworld` binary, by running, while inside the `elfloader` directory:
+
+```console
+kraft run --target elfloader-qemu-x86_64-initrd-strace --plat qemu --initrd ../dynamic-apps/lang/c/helloworld/:/ -- /helloworld
+```
+
+Because we used an `strace` target, the output of the program also consists of system calls invoked by the Linux binary after loading.
+
 ## Quick Setup (aka TLDR)
 
 For a quick setup, run the commands below.
