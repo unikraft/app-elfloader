@@ -120,6 +120,15 @@ sudo apt install -y --no-install-recommends \
   sgabios
 ```
 
+Running the ELF loader app with QEMU might require networking support, depending on the Linux application used (such as Nginx, or Redis).
+For this to work properly a specific configuration must be enabled for QEMU.
+Run the commands below to enable that configuration (for the network bridge to work):
+
+```console
+sudo mkdir /etc/qemu/
+echo "allow all" | sudo tee /etc/qemu/bridge.conf
+```
+
 ## Set Up
 
 The following repositories are required for `app-elfloader`:
