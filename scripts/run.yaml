@@ -24,3 +24,8 @@ runs:
     command: /http_server
     memory: 64
     networking: True
+  - name: curl
+    rootfs: ../dynamic-apps/curl
+    command: /curl google.com
+    networking: True
+    memory: 64
