@@ -14,3 +14,8 @@ runs:
     command: /usr/bin/sqlite3 
     memory: 64
     networking: False
+  - name: curl
+    rootfs: ../dynamic-apps/curl
+    command: /curl google.com
+    networking: True
+    memory: 64
