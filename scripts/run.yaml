@@ -14,3 +14,8 @@ runs:
     command: /usr/bin/sqlite3 
     memory: 64
     networking: False
+    name: helloworld-cpp
+    rootfs: ../dynamic-apps/lang/c++/helloworld
+    command: /helloworld
+    memory: 64
+    networking: False
