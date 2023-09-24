@@ -44,3 +44,8 @@ runs:
     command: /usr/bin/openssl sha256 /input.txt
     memory: 64
     networking: False
+  - name: bzip2
+    rootfs: ../dynamic-apps/bzip2
+    command: /bin/bzip2 -f -k /input.txt
+    memory: 64
+    networking: False
