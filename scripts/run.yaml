@@ -9,3 +9,8 @@ runs:
     command: /helloworld
     memory: 64
     networking: False
+  - name: bzip2
+    rootfs: ../dynamic-apps/bzip2
+    command: /bin/bzip2
+    memory: 64
+    networking: False
