@@ -29,3 +29,8 @@ runs:
     command: /curl google.com
     networking: True
     memory: 64
+  - name: gnupg
+    rootfs: ../dynamic-apps/gnupg
+    command: /usr/bin/gpg --version
+    memory: 32
+    networking: False
