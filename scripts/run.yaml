@@ -14,3 +14,8 @@ runs:
     command: /usr/bin/sqlite3 
     memory: 64
     networking: False
+  - name: ffmpeg
+    rootfs: ../dynamic-apps/ffmpeg
+    command: /usr/bin/ffmpeg
+    memory: 256
+    networking: False
