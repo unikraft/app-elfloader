@@ -24,3 +24,8 @@ runs:
     command: /bin/echo
     memory: 64
     networking: True
+  - name: redis7
+    rootfs: ../dynamic-apps/redis7
+    command: /usr/bin/redis-server
+    memory: 64
+    networking: True
