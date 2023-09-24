@@ -19,3 +19,8 @@ runs:
     command: /usr/bin/redis-server
     memory: 64
     networking: True
+  - name: echo
+    rootfs: ../dynamic-apps/echo
+    command: /bin/echo
+    memory: 64
+    networking: True
