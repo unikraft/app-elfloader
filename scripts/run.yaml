@@ -9,3 +9,8 @@ runs:
     command: /helloworld
     memory: 64
     networking: False
+  - name: sqlite3
+    rootfs: ../dynamic-apps/sqlite3
+    command: /usr/bin/sqlite3 
+    memory: 64
+    networking: False
