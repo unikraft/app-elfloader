@@ -39,3 +39,8 @@ runs:
     command: /bin/node /http-hello.js
     memory: 512
     networking: True
+  - name: openssl
+    rootfs: ../dynamic-apps/openssl
+    command: /usr/bin/openssl sha256 /input.txt
+    memory: 64
+    networking: False
