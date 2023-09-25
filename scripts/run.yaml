@@ -19,3 +19,23 @@ runs:
     command: ./usr/bin/perl hello.pl
     memory: 64
     networking: False
+  - name: iputils
+    rootfs: ../dynamic-apps/iputils
+    command: /bin/ping 8.8.8.8
+    memory: 64
+    networking: True
+  - name: iputils
+    rootfs: ../dynamic-apps/iputils
+    command: /bin/tracepath 8.8.8.8
+    memory: 64
+    networking: True
+  - name: iputils
+    rootfs: ../dynamic-apps/iputils
+    command: /bin/arping 8.8.8.8
+    memory: 64
+    networking: True
+  - name: iputils
+    rootfs: ../dynamic-apps/iputils
+    command: /bin/clockdiff 8.8.8.8
+    memory: 64
+    networking: True
