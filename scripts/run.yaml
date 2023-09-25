@@ -9,8 +9,18 @@ runs:
     command: /helloworld
     memory: 64
     networking: False
+    name: sqlite3
+    rootfs: ../dynamic-apps/sqlite3
+    command: /usr/bin/sqlite3 
+    memory: 64
+    networking: False
     name: helloworld-cpp
     rootfs: ../dynamic-apps/lang/c++/helloworld
     command: /helloworld
+    memory: 64
+    networking: False
+    name: ls
+    rootfs: ../dynamic-apps/ls
+    command: /bin/ls
     memory: 64
     networking: False
