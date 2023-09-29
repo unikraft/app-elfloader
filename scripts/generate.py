@@ -19,11 +19,18 @@ make prepare
 make -j $(nproc)
 """
 
-TEMPLATE_BUILD_KRAFT = """#!/bin/sh
+TEMPLATE_BUILD_KRAFT_TARGET = """#!/bin/sh
 
 rm -fr .unikraft
 rm -f .config.*
 kraft build --log-level debug --log-type basic --target {} --plat {}
+"""
+
+TEMPLATE_BUILD_KRAFT_ARCH = """#!/bin/sh
+
+rm -fr .unikraft
+rm -f .config.*
+kraft build --log-level debug --log-type basic --arch {} --plat {}
 """
 
 TEMPLATE_RUN_QEMU_HEADER = """#!/bin/sh
@@ -105,7 +112,7 @@ sudo kraft stop --all
 sudo kraft rm --all
 """
 
-APPNAME = "elfloader"
+APPNAME = ""
 DEFCONFIGS = "defconfigs"
 SCRIPTS = "scripts"
 BUILD = os.path.join(SCRIPTS, "build")
@@ -135,15 +142,19 @@ def generate_build_make(target):
     st = os.stat(out_file)
     os.chmod(out_file, st.st_mode | stat.S_IEXEC)
 
-def generate_build_kraft(target, plat):
+def generate_build_kraft(name, arch, plat):
     """Generate build scripts using Kraftkit.
 
     Scripts are generated in scripts/build/ directory and start
     with the `kraft-` prefix.
     """
 
-    contents = TEMPLATE_BUILD_KRAFT.format(target, plat)
-    suffix = target.replace(APPNAME+"-", "")
+    if name:
+        contents = TEMPLATE_BUILD_KRAFT_TARGET.format(name, plat)
+        suffix = name.replace(APPNAME+"-", "")
+    else:
+        contents = TEMPLATE_BUILD_KRAFT_ARCH.format(arch, plat)
+        suffix = f"{plat}-{arch}"
     out_file = os.path.join(BUILD, f"kraft-{suffix}.sh")
     with open(out_file, "w", encoding="utf8") as stream:
         stream.write(contents)
@@ -166,8 +177,21 @@ def generate_build():
     # Generate KraftKit-based build scripts from kraft.yaml targets.
     with open(KRAFTCONFIG, "r", encoding="utf8") as stream:
         data = yaml.safe_load(stream)
+        if 'targets' not in data.keys():
+            printf(f"No targets in {KRAFTCONFIG}.")
+            return
         for target in data['targets']:
-            generate_build_kraft(target['name'], target['platform'])
+            if 'platform' not in target.keys():
+                printf(f"No platform found.")
+                continue
+            if 'architecture' not in target.keys():
+                printf(f"No architecture found.")
+                continue
+            if 'name' in target.keys():
+                name = target['name']
+            else:
+                name = None
+            generate_build_kraft(name, target['architecture'], target['platform'])
 
 def generate_run_fc(run, arch, fs):
     """Generate running scripts using Firecracker.
@@ -176,7 +200,20 @@ def generate_run_fc(run, arch, fs):
     with the `fc-` prefix. The corresponding JSON file is generated.
     """
 
-    json_name = os.path.join(RUN, f"fc-{arch}-{fs}-{run['name']}.json")
+    if fs:
+        if 'name' in run.keys():
+            json_name = os.path.join(RUN, f"fc-{arch}-{fs}-{run['name']}.json")
+        else:
+            json_name = os.path.join(RUN, f"fc-{arch}-{fs}.json")
+    else:
+        if 'name' in run.keys():
+            json_name = os.path.join(RUN, f"fc-{arch}-{run['name']}.json")
+        else:
+            json_name = os.path.join(RUN, f"fc-{arch}.json")
+    if 'command' in run.keys():
+        command = run["command"]
+    else:
+        command = "placeholder"
     with open(json_name, "w", encoding="utf8") as stream:
         stream.write("{\n")
         stream.write("  \"boot-source\": {\n")
@@ -184,9 +221,9 @@ def generate_run_fc(run, arch, fs):
         if run["networking"]:
             stream.write(f"    \"boot_args\": \"{APPNAME}_fc-{arch} ")
             stream.write("netdev.ipv4_addr=172.44.0.2 netdev.ipv4_gw_addr=172.44.0.1 ")
-            stream.write(f"netdev.ipv4_subnet_mask=255.255.255.0 -- {run['command']}\"")
+            stream.write(f"netdev.ipv4_subnet_mask=255.255.255.0 -- {command}\"")
         else:
-            stream.write(f"    \"boot_args\": \"{APPNAME}_fc-{arch} {run['command']}\"")
+            stream.write(f"    \"boot_args\": \"{APPNAME}_fc-{arch} {command}\"")
         if "rootfs" in run.keys():
             stream.write(",\n    \"initrd_path\": \"rootfs.cpio\"")
         stream.write("\n  },\n")
@@ -223,7 +260,16 @@ def generate_run_fc(run, arch, fs):
 """)
 
     header = TEMPLATE_RUN_FIRECRACKER_HEADER.format(json_name)
-    out_file = os.path.join(RUN, f"fc-{arch}-{fs}-{run['name']}.sh")
+    if fs:
+        if 'name' in run.keys():
+            out_file = os.path.join(RUN, f"fc-{arch}-{fs}-{run['name']}.sh")
+        else:
+            out_file = os.path.join(RUN, f"fc-{arch}-{fs}.sh")
+    else:
+        if 'name' in run.keys():
+            out_file = os.path.join(RUN, f"fc-{arch}-{run['name']}.sh")
+        else:
+            out_file = os.path.join(RUN, f"fc-{arch}.sh")
     with open(out_file, "w", encoding="utf8") as stream:
         stream.write(header)
         if "rootfs" in run.keys():
@@ -249,8 +295,20 @@ def generate_run_qemu(run, arch, fs):
     """
 
     kernel = os.path.join(os.path.join("workdir", "build"), f"{APPNAME}_qemu-{arch}")
-    header = TEMPLATE_RUN_QEMU_HEADER.format(kernel, run["command"])
-    out_file = os.path.join(RUN, f"qemu-{arch}-{fs}-{run['name']}.sh")
+    if 'command' in run.keys():
+        header = TEMPLATE_RUN_QEMU_HEADER.format(kernel, run["command"])
+    else:
+        header = TEMPLATE_RUN_QEMU_HEADER.format(kernel, "placeholder")
+    if fs:
+        if 'name' in run.keys():
+            out_file = os.path.join(RUN, f"qemu-{arch}-{fs}-{run['name']}.sh")
+        else:
+            out_file = os.path.join(RUN, f"qemu-{arch}-{fs}.sh")
+    else:
+        if 'name' in run.keys():
+            out_file = os.path.join(RUN, f"qemu-{arch}-{run['name']}.sh")
+        else:
+            out_file = os.path.join(RUN, f"qemu-{arch}.sh")
     with open(out_file, "w", encoding="utf8") as stream:
         stream.write(header)
         if "rootfs" in run.keys():
@@ -266,6 +324,9 @@ def generate_run_qemu(run, arch, fs):
             stream.write("sudo ")
         if arch == "x86_64":
             stream.write("qemu-system-x86_64 \\\n")
+            if 'accel' in run.keys():
+                if run['accel']:
+                    stream.write("    -accel kvm \\\n")
         else:
             stream.write("qemu-system-aarch64 \\\n")
             stream.write("    -machine virt \\\n")
@@ -291,16 +352,27 @@ def generate_run_qemu(run, arch, fs):
         st = os.stat(out_file)
         os.chmod(out_file, st.st_mode | stat.S_IEXEC)
 
-def generate_run_kraft(run, target, plat, fs):
+def generate_run_kraft(run, name, arch, plat, fs):
     """Generate running scripts using KraftKit.
 
     Scripts are generated in scripts/run/ directory and start
     with the `kraft-` prefix.
     """
 
-    suffix = target.replace(APPNAME+"-", "")
-    out_file = os.path.join(RUN, f"kraft-{suffix}-{run['name']}.sh")
-    header = TEMPLATE_RUN_KRAFT_HEADER.format(run["command"])
+    if plat == "firecracker":
+        plat = "fc"
+    if name:
+        suffix = name.replace(APPNAME+"-", "")
+    else:
+        suffix = f"{plat}-{arch}"
+    if 'name' in run.keys():
+        out_file = os.path.join(RUN, f"kraft-{suffix}-{run['name']}.sh")
+    else:
+        out_file = os.path.join(RUN, f"kraft-{suffix}.sh")
+    if 'command' in run.keys():
+        header = TEMPLATE_RUN_KRAFT_HEADER.format(run['command'])
+    else:
+        header = TEMPLATE_RUN_KRAFT_HEADER.format("placeholder")
     with open(out_file, "w", encoding="utf8") as stream:
         stream.write(header)
         if "rootfs" in run.keys():
@@ -313,10 +385,17 @@ def generate_run_kraft(run, target, plat, fs):
         if run["networking"]:
             stream.write("sudo ")
         stream.write("kraft run \\\n")
+        if 'accel' not in run.keys():
+            stream.write("    -W \\\n")
+        elif not run['accel']:
+            stream.write("    -W \\\n")
         stream.write("    --log-level debug --log-type basic \\\n")
         if run["networking"]:
             stream.write("    --network bridge:virbr0 \\\n")
-        stream.write(f"    --target {target} --plat {plat} \\\n")
+        if name:
+            stream.write(f"    --target {name} --plat {plat} \\\n")
+        else:
+            stream.write(f"    --arch {arch} --plat {plat} \\\n")
         if "rootfs" in run.keys():
             if fs == "initrd":
                 stream.write("    --initrd \"$rootfs\" \\\n")
@@ -347,33 +426,56 @@ def generate_run():
     # Obtain targets for basic QEMU and Firecracker-based runs from defconfigs.
     def_targets = []
     for file in files(DEFCONFIGS):
-        def_targets.append(tuple(file.split('-')[0:3]))
+        tokens = file.split('-')
+        if len(tokens) == 2:
+            item = (tokens[0], tokens[1], None)
+        elif len(tokens) >= 3:
+            item = (tokens[0], tokens[1], tokens[2])
+        else:
+            print(f"Unknown tokens in deconfig file {file}")
+        def_targets.append(item)
     def_targets = set(def_targets)
 
+    print(def_targets)
     # Obtain targets for KraftKit runs form kraft.yaml.
     with open(KRAFTCONFIG, "r", encoding="utf8") as stream:
         data = yaml.safe_load(stream)
-        kraft_targets = data['targets']
+        if 'targets' not in data.keys():
+            printf(f"No targets in {KRAFTCONFIG}.")
+            return
 
-    # Walk through all configured applications.
-    for run in runs:
-        # Generate QEMU/Firecrakcer based scripts based on defconfigs.
-        for plat, arch, fs in def_targets:
-            if plat == "fc":
-                generate_run_fc(run, arch, fs)
-            if plat == "qemu":
-                generate_run_qemu(run, arch, fs)
+        # Walk through all configured applications.
+        for run in runs:
+            # Generate QEMU/Firecrakcer based scripts based on defconfigs.
+            for plat, arch, fs in def_targets:
+                if plat == "fc":
+                    generate_run_fc(run, arch, fs)
+                if plat == "qemu":
+                    generate_run_qemu(run, arch, fs)
 
-        # Generate KraftKit-based run scripts from kraft.yaml targets.
-        for target in kraft_targets:
-            fs = None
-            if 'kconfig' not in target:
-                fs = ""
-            if "CONFIG_LIBVFSCORE_ROOTFS=\"9pfs\"" in target['kconfig']:
-                fs = "9pfs"
-            elif "CONFIG_LIBVFSCORE_ROOTFS=\"initrd\"" in target['kconfig']:
-                fs = "initrd"
-            generate_run_kraft(run, target['name'], target['platform'], fs)
+            # Generate KraftKit-based run scripts from kraft.yaml targets.
+            for target in data['targets']:
+                fs = None
+                if 'kconfig' in target:
+                    if "CONFIG_LIBVFSCORE_ROOTFS=\"9pfs\"" in target['kconfig']:
+                        fs = "9pfs"
+                    elif "CONFIG_LIBVFSCORE_ROOTFS=\"initrd\"" in target['kconfig']:
+                        fs = "initrd"
+                if 'name' in target.keys():
+                    name = target['name']
+                else:
+                    name = None
+                generate_run_kraft(run, name, target['architecture'], target['platform'], fs)
+
+def get_appname():
+    """Get the application name from the current directory.
+
+    Application name is the last part in the directory path.
+    """
+
+    global APPNAME
+
+    APPNAME = os.path.basename(os.getcwd())
 
 def main():
     """The main program function calls generate functions.
@@ -381,6 +483,7 @@ def main():
     In effect, this triggers the generation of build and run scripts.
     """
 
+    get_appname()
     generate_build()
     generate_run()
 
