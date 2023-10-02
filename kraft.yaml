@@ -137,6 +137,17 @@ targets:
       - CONFIG_LIBSYSCALL_SHIM_DEBUG=y
       - CONFIG_LIBUKDEBUG_PRINTK_INFO=y
       - CONFIG_LIBUKDEBUG_PRINTD=y
+  - name: elfloader-qemu-aarch64-9pfs
+    architecture: arm64
+    platform: qemu
+    kconfig:
+      - CONFIG_PLAT_KVM=y
+      - CONFIG_ARCH_ARM_64=y
+      - CONFIG_MCPU_ARM64_NONE=y
+      - CONFIG_LIBVFSCORE_AUTOMOUNT_ROOTFS=y
+      - CONFIG_LIBVFSCORE_ROOTFS_9PFS=y
+      - CONFIG_LIBVFSCORE_ROOTFS="9pfs"
+      - CONFIG_LIBVFSCORE_ROOTDEV="fs1"
 libraries:
   lwip:
     version: stable
