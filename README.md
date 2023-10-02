@@ -48,41 +48,21 @@ For a quick setup, run the commands below.
 Note that you still need to install the [requirements](#requirements).
 
 For building and running everything, follow the steps below.
-We will use the system `ls` command for running, and we will assume it is located at `/usr/bin/ls`
 
 ```console
+git clone https://github.com/unikraft/dynamic-apps
 git clone https://github.com/unikraft/app-elfloader elfloader
 cd elfloader/
-git clone https://github.com/unikraft/unikraft workdir/unikraft
-git clone https://github.com/unikraft/lib-lwip workdir/libs/lwip
-git clone https://github.com/unikraft/lib-libelf workdir/libs/libelf
-UK_DEFCONFIG=$(pwd)/defconfigs/qemu-x86_64-9pfs make defconfig
-make -j $(nproc)
-qemu-system-x86_64 \
-    -fsdev local,id=myid,path="/",security_model=none \
-    -device virtio-9p-pci,fsdev=myid,mount_tag=fs1,disable-modern=on,disable-legacy=off \
-    -kernel workdir/build/elfloader_qemu-x86_64 -nographic \
-    -enable-kvm -cpu host \
-    -append /bin/ls
+./script/setup.sh
+wget https://raw.githubusercontent.com/unikraft/app-testing/staging/scripts/generate.py -O scripts/generate.py
+chmod a+x scripts/generate.py
+./scripts/generate.py
+./scripts/build/make-qemu-x86_64-9pfs.sh
+./scripts/run/qemu-x86_64-9pfs-helloworld-c.sh
 ```
 
 This will configure and build the `app-elfloader`.
-After that, it will run the `/bin/ls` `ELF` file on top of the `elfloader` image:
-
-```text
-SeaBIOS (version rel-1.16.2-0-gea1b7a073390-prebuilt.qemu.org)
-
-iPXE (http://ipxe.org) 00:03.0 CA00 PCI2.10 PnP PMM+06FD0FC0+06F30FC0 CA00
-
-Booting from ROM..Powered by
-o.   .o       _ _               __ _
-Oo   Oo  ___ (_) | __ __  __ _ ' _) :_
-oO   oO ' _ `| | |/ /  _)' _` | |_|  _)
-oOo oOO| | | | |   (| | | (_) |  _) :_
- OoOoO ._, ._:_:_,\_._,  .__,_:_, \___)
-                  Atlas 0.13.1~21ce1acf
-bin  boot  cdrom  dev  etc  home  lib  lib32  lib64  libx32  lost+found  media  mnt  opt  proc  root  run  sbin  snap  srv  sys  tmp  usr  var
-```
+After that, it will run the `/helloworld` `ELF` file from the [`dynamic-apps` repository](https://github.com/unikraft/dynamic-apps) on top of the `elfloader` image:
 
 **Note**: Close the linger QEMU VM by using `Ctrl+a x`.
 That is, press `Ctrl` and `a` at the same time, and then, separately, `x`.
@@ -141,7 +121,13 @@ The following repositories are required for `app-elfloader`:
 
 Follow the steps below for the setup:
 
-  1. First clone the [`app-elfloader` repository](https://github.com/unikraft/app-elfloader) in the `elfloader/` directory:
+  1. First clone the [`dynamic-apps` repository](https://github.com/unikraft/dynamic-apps) that contains pre-build ELFs to be used with `elfloader`:
+
+     ```console
+     git clone https://github.com/unikraft/dynamic-apps dynamic-apps
+     ```
+
+  1. Now clone the [`app-elfloader` repository](https://github.com/unikraft/app-elfloader) in the `elfloader/` directory, on the same level with the `dynamic-apps` repository clone:
 
      ```console
      git clone https://github.com/unikraft/app-elfloader elfloader
@@ -161,45 +147,13 @@ Follow the steps below for the setup:
      arch_prctl.c  brk.c  Config.uk  elf_ctx.c  elf_load.c  elf_prog.h  example/  exportsyms.uk  libelf_helper.h  main.c  Makefile  Makefile.uk  README.md  support/
      ```
 
-  1. While inside the `elfloader/` directory, create the `workdir/` directory:
+  1. While inside the `elfloader/` directory, clone all required repositories by using the `setup.sh` script:
 
      ```console
-     mkdir workdir
+     ./scripts/setup.sh
      ```
 
-     Enter the `workdir/` directory:
-
-     ```console
-     cd workdir/
-     ```
-
-  1. While inside the `workdir` directory, clone the [`unikraft` repository](https://github.com/unikraft/unikraft):
-
-     ```console
-     git clone https://github.com/unikraft/unikraft unikraft
-     ```
-
-  1. While inside the `workdir/` directory, create the `libs/` directory:
-
-     ```console
-     mkdir libs
-     ```
-
-  1. While inside the `workdir/` directory, clone the library repositories in the `libs/` directory:
-
-     ```console
-     git clone https://github.com/unikraft/lib-lwip libs/lwip
-
-     git clone https://github.com/unikraft/lib-libelf libs/libelf
-     ```
-
-  1. Get back to the application directory:
-
-     ```console
-     cd ../
-     ```
-
-     Use the `tree` command to inspect the contents of the `workdir/` directory.
+  1. Use the `tree` command to inspect the contents of the `workdir/` directory.
      It should print something like this:
 
      ```console
