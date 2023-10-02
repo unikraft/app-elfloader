@@ -171,6 +171,9 @@ static int elf_load_parse(struct elf_prog *elf_prog, Elf *elf)
 			continue;
 		}
 
+		if (elf_prog->align < phdr.p_align)
+			elf_prog->align = phdr.p_align;
+
 		uk_pr_debug("%s: phdr[%"PRIu64"]: %c%c%c, offset: %p, vaddr: %p, paddr: %p, filesz: %"PRIu64" B, memsz %"PRIu64" B, align: %"PRIu64" B\n",
 			    elf_prog->name, phi,
 			    phdr.p_flags & PF_R ? 'R' : '-',
@@ -233,12 +236,14 @@ static void elf_unload_vaimg(struct elf_prog *elf_prog)
 static int elf_load_imgcpy(struct elf_prog *elf_prog, Elf *elf,
 			   const void *img_base, size_t img_len __unused)
 {
+	size_t phnum, phi;
 	uintptr_t vastart;
 	uintptr_t vaend;
 	GElf_Ehdr ehdr;
 	GElf_Phdr phdr;
-	size_t phnum, phi;
 	int ret;
+
+	UK_ASSERT(elf_prog->align && PAGE_ALIGNED(elf_prog->align));
 
 	if (unlikely(gelf_getehdr(elf, &ehdr) == NULL)) {
 		elferr_err("%s: Failed to get executable header",
@@ -247,7 +252,7 @@ static int elf_load_imgcpy(struct elf_prog *elf_prog, Elf *elf,
 		goto err_out;
 	}
 
-	elf_prog->vabase = uk_memalign(elf_prog->a, __PAGE_SIZE,
+	elf_prog->vabase = uk_memalign(elf_prog->a, elf_prog->align,
 				       elf_prog->valen);
 	if (unlikely(!elf_prog->vabase)) {
 		uk_pr_debug("%s: Not enough memory to load image (failed to allocate %"PRIu64" bytes)\n",
@@ -267,6 +272,7 @@ static int elf_load_imgcpy(struct elf_prog *elf_prog, Elf *elf,
 		ret = -ENOEXEC;
 		goto err_free_img;
 	}
+
 	elf_prog->entry = (uintptr_t) elf_prog->vabase + ehdr.e_entry;
 	for (phi = 0; phi < phnum; ++phi) {
 		if (gelf_getphdr(elf, phi, &phdr) != &phdr) {
@@ -349,6 +355,8 @@ static int elf_load_fdread(struct elf_prog *elf_prog, Elf *elf, int fd)
 	size_t phnum, phi;
 	int ret = -1;
 
+	UK_ASSERT(elf_prog->align && PAGE_ALIGNED(elf_prog->align));
+
 	if (unlikely(gelf_getehdr(elf, &ehdr) == NULL)) {
 		elferr_err("%s: Failed to get executable header",
 			   elf_prog->name);
@@ -356,7 +364,7 @@ static int elf_load_fdread(struct elf_prog *elf_prog, Elf *elf, int fd)
 		goto err_out;
 	}
 
-	elf_prog->vabase = uk_memalign(elf_prog->a, __PAGE_SIZE,
+	elf_prog->vabase = uk_memalign(elf_prog->a, elf_prog->align,
 				       elf_prog->valen);
 	if (unlikely(!elf_prog->vabase)) {
 		uk_pr_debug("%s: Not enough memory to load image (failed to allocate %"PRIu64" bytes)\n",

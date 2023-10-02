@@ -63,6 +63,7 @@ struct elf_prog {
 		char *path;
 		struct elf_prog *prog;
 	} interp;
+	size_t align;
 };
 
 /**
