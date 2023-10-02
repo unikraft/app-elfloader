@@ -232,30 +232,64 @@ Follow the steps below for the setup:
 
 ## Scripted Building and Running
 
-To make it easier build and run and test different configurations, the repository provides a set of scripts that do everything required.
-These are scripts used for building different configurations of the ELF Loader and for running these with all the requirements behind the scenes: creating network configurations, setting up archives etc.
+To build and run Unikraft images, it's easiest to generate build and running scripts and use those.
 
-First, generate these scripts by running the `generate.py` script while on the `elfloader` directory:
+First of all, grab the [`generate.py` script](https://github.com/unikraft/app-testing/blob/staging/scripts/generate.py) and place it in the `scripts/` directory by running:
+
+```console
+wget https://raw.githubusercontent.com/unikraft/app-testing/staging/scripts/generate.py -O scripts/generate.py
+chmod a+x scripts/generate.py
+```
+
+Now, run the `generate.py` script.
+You must run it in the root directory of this repository:
 
 ```console
 ./scripts/generate.py
 ```
 
-The scripts (as shell scripts) are now generated in `scripts/build/` and `scripts/run/`:
+Running the script will generate build and run scripts in the `scripts/build/` and the `scripts/run/` directories:
 
 ```text
-scripts/build/:
-kraft-fc-x86_64-initrd-debug.sh*   kraft-qemu-x86_64-9pfs-debug.sh*   kraft-qemu-x86_64-initrd-debug.sh*   make-fc-x86_64-initrd-debug.sh*   make-qemu-x86_64-9pfs-debug.sh*   make-qemu-x86_64-initrd-debug.sh*
-kraft-fc-x86_64-initrd.sh*         kraft-qemu-x86_64-9pfs.sh*         kraft-qemu-x86_64-initrd.sh*         make-fc-x86_64-initrd.sh*         make-qemu-x86_64-9pfs.sh*         make-qemu-x86_64-initrd.sh*
-kraft-fc-x86_64-initrd-strace.sh*  kraft-qemu-x86_64-9pfs-strace.sh*  kraft-qemu-x86_64-initrd-strace.sh*  make-fc-x86_64-initrd-strace.sh*  make-qemu-x86_64-9pfs-strace.sh*  make-qemu-x86_64-initrd-strace.sh*
-
-scripts/run:
-fc-x86_64-initrd-helloworld-c.json             kraft-fc-x86_64-initrd-helloworld-c.sh*         kraft-qemu-x86_64-9pfs-helloworld-c.sh*          kraft-qemu-x86_64-initrd-helloworld-c.sh*         qemu-x86_64-initrd-helloworld-c.sh*
-fc-x86_64-initrd-helloworld-c.sh*              kraft-fc-x86_64-initrd-nginx.sh*                kraft-qemu-x86_64-9pfs-nginx.sh*                 kraft-qemu-x86_64-initrd-nginx.sh*                qemu-x86_64-initrd-nginx.sh*
-fc-x86_64-initrd-nginx.json                    kraft-fc-x86_64-initrd-strace-helloworld-c.sh*  kraft-qemu-x86_64-9pfs-strace-helloworld-c.sh*   kraft-qemu-x86_64-initrd-strace-helloworld-c.sh*
-fc-x86_64-initrd-nginx.sh*                     kraft-fc-x86_64-initrd-strace-nginx.sh*         kraft-qemu-x86_64-9pfs-strace-nginx.sh*          kraft-qemu-x86_64-initrd-strace-nginx.sh*
-kraft-fc-x86_64-initrd-debug-helloworld-c.sh*  kraft-qemu-x86_64-9pfs-debug-helloworld-c.sh*   kraft-qemu-x86_64-initrd-debug-helloworld-c.sh*  qemu-x86_64-9pfs-helloworld-c.sh*
-kraft-fc-x86_64-initrd-debug-nginx.sh*         kraft-qemu-x86_64-9pfs-debug-nginx.sh*          kraft-qemu-x86_64-initrd-debug-nginx.sh*         qemu-x86_64-9pfs-nginx.sh*
+scripts/
+|-- build/
+|   |-- kraft-fc-x86_64-initrd-debug.sh*
+|   |-- kraft-fc-x86_64-initrd.sh*
+|   |-- kraft-fc-x86_64-initrd-strace.sh*
+|   |-- kraft-qemu-x86_64-9pfs-debug.sh*
+|   |-- kraft-qemu-x86_64-9pfs.sh*
+|   |-- kraft-qemu-x86_64-9pfs-strace.sh*
+|   |-- kraft-qemu-x86_64-initrd-debug.sh*
+|   |-- kraft-qemu-x86_64-initrd.sh*
+|   |-- kraft-qemu-x86_64-initrd-strace.sh*
+|   |-- make-fc-x86_64-initrd-debug.sh*
+|   |-- make-fc-x86_64-initrd.sh*
+|   |-- make-fc-x86_64-initrd-strace.sh*
+|   |-- make-qemu-x86_64-9pfs-debug.sh*
+|   |-- make-qemu-x86_64-9pfs.sh*
+|   |-- make-qemu-x86_64-9pfs-strace.sh*
+|   |-- make-qemu-x86_64-initrd-debug.sh*
+|   |-- make-qemu-x86_64-initrd.sh*
+|   `-- make-qemu-x86_64-initrd-strace.sh*
+|-- generate.py*
+|-- run/
+|   |-- fc-x86_64-initrd-helloworld-c.json
+|   |-- fc-x86_64-initrd-helloworld-c.sh*
+|   |-- fc-x86_64-initrd-nginx.json
+[...]
+|   |-- kraft-qemu-x86_64-initrd-nginx.sh*
+|   |-- kraft-qemu-x86_64-initrd-sqlite3.sh*
+|   |-- kraft-qemu-x86_64-initrd-strace-helloworld-c.sh*
+|   |-- kraft-qemu-x86_64-initrd-strace-nginx.sh*
+|   |-- kraft-qemu-x86_64-initrd-strace-sqlite3.sh*
+|   |-- qemu-x86_64-9pfs-helloworld-c.sh*
+|   |-- qemu-x86_64-9pfs-nginx.sh*
+|   |-- qemu-x86_64-9pfs-sqlite3.sh*
+|   |-- qemu-x86_64-initrd-helloworld-c.sh*
+|   |-- qemu-x86_64-initrd-nginx.sh*
+|   `-- qemu-x86_64-initrd-sqlite3.sh*
+|-- run.yaml
+`-- setup.sh*
 ```
 
 They are shell scripts, so you can use an editor or a text viewer to check their contents:
