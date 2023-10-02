@@ -94,9 +94,11 @@ extern char *vdso_image_addr;
 
 #if CONFIG_ARCH_X86_64
 	static const char *auxv_platform = "x86_64";
+#elif CONFIG_ARCH_ARM_64
+	static const char *auxv_platform = "aarch64";
 #else
 #error "Unsupported architecture"
-#endif /* CONFIG_ARCH_X86_64 */
+#endif
 
 void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		  const char *argv0, int argc, char *argv[], char *environ[],
@@ -193,19 +195,19 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 	 *
 	 * Auxiliary vector (NOTE: we push the terminating NULL first)
 	 */
-	ukarch_rctx_stackpush(ctx, auxv_null);
+	ukarch_rctx_stackpush_packed(ctx, auxv_null);
 	for (i = (int) ARRAY_SIZE(auxv) - 1; i >= 0; --i)
-		ukarch_rctx_stackpush(ctx, auxv[i]);
+		ukarch_rctx_stackpush_packed(ctx, auxv[i]);
 
 	/*
 	 * envp
 	 */
 	/* NOTE: As expected, this will push NULL to the stack first */
-	ukarch_rctx_stackpush(ctx, (long) NULL);
+	ukarch_rctx_stackpush_packed(ctx, (long) NULL);
 	if (environ) {
 		for (i = envc-1; i >= 0; --i) {
 			uk_pr_debug("env[%d]=\"%s\"\n", i, environ[i]);
-			ukarch_rctx_stackpush(ctx, (uintptr_t) environ[i]);
+			ukarch_rctx_stackpush_packed(ctx, (uintptr_t) environ[i]);
 		}
 	}
 
@@ -213,13 +215,13 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 	 * argv + argc
 	 */
 	/* Same as envp, pushing NULL first */
-	ukarch_rctx_stackpush(ctx, (long) NULL);
+	ukarch_rctx_stackpush_packed(ctx, (long) NULL);
 	if (argc)
 		for (i = argc - 1; i >= 0; --i)
-			ukarch_rctx_stackpush(ctx, (uintptr_t) argv[i]);
+			ukarch_rctx_stackpush_packed(ctx, (uintptr_t) argv[i]);
 	if (argv0)
-		ukarch_rctx_stackpush(ctx, (uintptr_t) argv0);
-	ukarch_rctx_stackpush(ctx, (long) argc + (argv0 ? 1 : 0));
+		ukarch_rctx_stackpush_packed(ctx, (uintptr_t) argv0);
+	ukarch_rctx_stackpush_packed(ctx, (long) argc + (argv0 ? 1 : 0));
 
 	UK_ASSERT(IS_ALIGNED(ctx->sp, UKARCH_SP_ALIGN));
 
