@@ -14,3 +14,13 @@ runs:
     command: /usr/bin/sqlite3 
     memory: 64
     networking: False
+  - name: http_server-python
+    rootfs: ../dynamic-apps/lang/python
+    command: /python http_server.py
+    memory: 64
+    networking: True
+  - name: echo
+    rootfs: ../dynamic-apps/echo
+    command: /bin/echo
+    memory: 64
+    networking: False
