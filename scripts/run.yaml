@@ -14,3 +14,8 @@ runs:
     command: /usr/bin/sqlite3 
     memory: 64
     networking: False
+  - name: imagemagick
+    rootfs: ../dynamic-apps/imagemagick
+    command: /usr/bin/magick convert img.png img.jpg
+    memory: 64
+    networking: False
