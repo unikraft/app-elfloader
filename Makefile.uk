@@ -16,16 +16,20 @@ APPELFLOADER_SRCS-$(CONFIG_VDSO) += $(APPELFLOADER_BUILD)/vdso-image.c
 APPELFLOADER_SRCS-$(CONFIG_VDSO) += $(APPELFLOADER_BASE)/vdso/vsyscall.c
 
 $(APPELFLOADER_BUILD)/vdso.o: $(APPELFLOADER_BASE)/vdso/vdso.c
-	$(CC) $< -c -o $@ -fPIC -O2 -nostdlib
+	$(call build_cmd,CC,appelfloader,$(notdir $@), \
+		$(CC) $< -c -o $@ -fPIC -O2 -nostdlib)
 
 $(APPELFLOADER_BUILD)/vdso.patched.o: $(APPELFLOADER_BUILD)/vdso.o $(APPELFLOADER_BASE)/vdso/vdso_mapping.conf
-	OBJCOPY_CMD=$(OBJCOPY) APPELFLOADER_BASE=$(APPELFLOADER_BASE) VDSO_MAGIC_NUMBER=0x369C217100000000 $(APPELFLOADER_BASE)/vdso/add_symbol.sh $(APPELFLOADER_BASE)/vdso/vdso_mapping.conf $< $@
+	$(call build_cmd,ADDSYM,appelfloader,$(notdir $@), \
+		OBJCOPY_CMD=$(OBJCOPY) APPELFLOADER_BASE=$(APPELFLOADER_BASE) VDSO_MAGIC_NUMBER=0x369C217100000000 $(APPELFLOADER_BASE)/vdso/add_symbol.sh $(APPELFLOADER_BASE)/vdso/vdso_mapping.conf $< $@)
 
 $(APPELFLOADER_BUILD)/libvdso.so: $(APPELFLOADER_BUILD)/vdso.patched.o $(APPELFLOADER_BASE)/vdso/vdso.lds
-	$(LD) $< -o $@ -nostdlib -Wl,--hash-style=both -Wl,-soname=unikraft-vdso.so.1 -Wl,-shared -Wl,-T,$(APPELFLOADER_BASE)/vdso/vdso.lds
+	$(call build_cmd,LD,appelfloader,$(notdir $@), \
+		$(LD) $< -o $@ -nostdlib -Wl$(comma)--hash-style=both -Wl$(comma)-soname=unikraft-vdso.so.1 -Wl$(comma)-shared -Wl$(comma)-T$(comma)$(APPELFLOADER_BASE)/vdso/vdso.lds)
 
 $(APPELFLOADER_BUILD)/vdso-image.c: $(APPELFLOADER_BUILD)/libvdso.so $(APPELFLOADER_BASE)/vdso/vdso_mapping.conf
-	$(PYTHON) $(APPELFLOADER_BASE)/vdso/bin2c.py $(APPELFLOADER_BASE)/vdso/vdso_mapping.conf $< $@
+	$(call build_cmd,PYTHON,appelfloader,$(notdir $@), \
+		$(PYTHON) $(APPELFLOADER_BASE)/vdso/bin2c.py $(APPELFLOADER_BASE)/vdso/vdso_mapping.conf $< $@)
 
 APPELFLOADER_CLEAN += $(APPELFLOADER_BUILD)/vdso.o
 APPELFLOADER_CLEAN += $(APPELFLOADER_BUILD)/vdso.patched.o
