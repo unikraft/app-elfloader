@@ -34,3 +34,8 @@ runs:
     command: /usr/bin/gpg --version
     memory: 32
     networking: False
+  - name: node
+    rootfs: ../dynamic-apps/node
+    command: /bin/node /http-hello.js
+    memory: 512
+    networking: True
