@@ -24,6 +24,11 @@ runs:
     command: /http_server
     memory: 64
     networking: True
+  - name: http_server_c
+    rootfs: ../dynamic-apps/lang/c/http_server
+    command: /http_server
+    memory: 64
+    networking: True
   - name: curl
     rootfs: ../dynamic-apps/curl
     command: /curl google.com
