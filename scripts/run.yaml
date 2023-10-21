@@ -54,3 +54,8 @@ runs:
     command: /bin/gzip  -k -f /input.txt
     memory: 64
     networking: False
+  - name: du
+    rootfs: ../dynamic-apps/du
+    command: /usr/bin/du /
+    memory: 64
+    networking: False
