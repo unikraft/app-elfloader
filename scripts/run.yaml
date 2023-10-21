@@ -19,3 +19,8 @@ runs:
     command: /curl google.com
     networking: True
     memory: 64
+    name: du
+    rootfs: ../dynamic-apps/du
+    command: usr/bin/du
+    memory: 64
+    networking: False
