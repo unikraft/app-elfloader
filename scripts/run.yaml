@@ -49,3 +49,8 @@ runs:
     command: /bin/bzip2 -f -k /input.txt
     memory: 64
     networking: False
+  - name: gzip
+    rootfs: ../dynamic-apps/gzip
+    command: /bin/gzip  -k -f /input.txt --stdout
+    memory: 64
+    networking: False
