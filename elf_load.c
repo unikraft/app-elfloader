@@ -198,11 +198,21 @@ static int elf_load_parse(struct elf_prog *elf_prog, Elf *elf)
 				elf_prog->upperl = phdr.p_paddr + phdr.p_memsz;
 		}
 		UK_ASSERT(elf_prog->lowerl <= elf_prog->upperl);
+
+		/* Calculate the in-memory phdr offset */
+		if (phdr.p_offset <= ehdr.e_phoff &&
+		    ehdr.e_phoff < phdr.p_offset + phdr.p_filesz)
+			elf_prog->phdr.off = ehdr.e_phoff - phdr.p_offset +
+					     phdr.p_paddr;
 	}
 	uk_pr_debug("%s: base: pie + 0x%"PRIx64", len: 0x%"PRIx64"\n",
 		    elf_prog->name, elf_prog->lowerl, elf_prog->upperl - elf_prog->lowerl);
 
-	elf_prog->phdr.off = ehdr.e_phoff;
+	/* This should've been set a few lines above. It can't be 0 either
+	 * because it would overlap with the actual Elf Header.
+	 */
+	UK_ASSERT(elf_prog->phdr.off);
+
 	elf_prog->phdr.num = ehdr.e_phnum;
 	elf_prog->phdr.entsize = ehdr.e_phentsize;
 	elf_prog->valen = PAGE_ALIGN_UP(elf_prog->upperl);
