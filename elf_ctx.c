@@ -164,7 +164,7 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		{ AT_RANDOM, (uintptr_t) rand },
 		{ AT_PHENT, prog->phdr.entsize },
 		{ AT_PHNUM, prog->phdr.num },
-		{ AT_PHDR, prog->start + prog->phdr.off },
+		{ AT_PHDR, (__uptr)prog->vabase + prog->phdr.off },
 #if CONFIG_VDSO
 		{ AT_SYSINFO_EHDR, (long)vdso_image_addr},
 #endif
