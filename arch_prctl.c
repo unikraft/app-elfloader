@@ -122,7 +122,7 @@ UK_LLSYSCALL_R_DEFINE(long, arch_prctl, long, code, long, addr, long, arg2)
 		case ARCH_SET_FS:
 			uk_pr_debug("arch_prctl option SET_FS(%p)\n",
 				    (void *) addr);
-			writefs((__uptr) addr);
+			_uk_syscall_ultlsp = (__uptr)addr;
 			return 0;
 
 		case ARCH_GET_GS: {
@@ -139,7 +139,7 @@ UK_LLSYSCALL_R_DEFINE(long, arch_prctl, long, code, long, addr, long, arg2)
 				    (void *) addr);
 			if (!addr)
 				return -EINVAL;
-			*((long *) addr) = readfs();
+			*((long *) addr) = _uk_syscall_ultlsp;
 			return 0;
 		}
 
