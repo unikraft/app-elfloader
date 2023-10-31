@@ -387,8 +387,6 @@ static int elf_load_mmap_filesz_memsz_diff(struct elf_prog *elf_prog,
 static int do_elf_load_fdphdr_0(struct elf_prog *elf_prog,
 				GElf_Phdr *phdr, int fd)
 {
-	uintptr_t vastart_old, vastart_aligned;
-	uintptr_t vaend_old, vaend_new;
 	uintptr_t vastart, vaend;
 	__sz mmap_len;
 	int rc;
@@ -401,57 +399,28 @@ static int do_elf_load_fdphdr_0(struct elf_prog *elf_prog,
 
 	mmap_len = elf_prog->valen + elf_prog->align;
 
+	/* Do a first dummy mmap to pre-allocate a large enough contiguous
+	 * mapping.
+	 */
 	vastart = (uintptr_t)mmap(NULL, mmap_len,
 				  PROT_EXEC | PROT_READ | PROT_WRITE,
-				  MAP_PRIVATE,
-				  fd, phdr->p_offset);
+				  MAP_PRIVATE | MAP_ANONYMOUS,
+				  -1, 0);
 	if (unlikely(vastart == (uintptr_t)MAP_FAILED)) {
-		uk_pr_err("Failed to mmap the phdr at offset %lu\n",
-			  phdr->p_offset);
+		uk_pr_err("Failed to mmap dummy area\n");
 		return (int)vastart;
 	}
 
-	vastart_aligned = ALIGN_UP(vastart, elf_prog->align);
-	vastart_old = vastart;
-
-	/* Force remap with MAP_FIXED */
-	if (vastart_aligned != vastart) {
-		vastart = (uintptr_t)mmap((void *)vastart_aligned,
-					  phdr->p_filesz,
-					  PROT_EXEC | PROT_READ | PROT_WRITE,
-					  MAP_PRIVATE | MAP_FIXED,
-					  fd, phdr->p_offset);
-		if (unlikely(vastart == (uintptr_t)MAP_FAILED)) {
-			uk_pr_err("Failed to mmap the phdr at offset %lu\n",
-				  phdr->p_offset);
-			return (int)vastart;
-		}
-
-		rc = munmap((void *)vastart_old, vastart - vastart_old);
-		if (unlikely(rc)) {
-			uk_pr_err("Failed to unmap [vastart_old, vastart)\n");
-			return rc;
-		}
+	/* Now unmap dummy area, since we've fetched the base address of the
+	 * large enough memory area
+	 */
+	rc = munmap((void *)vastart, mmap_len);
+	if (unlikely(rc)) {
+		uk_pr_err("Failed to unmap dummy area\n");
+		return rc;
 	}
 
-	uk_pr_debug("%s: Memory mapped 0x%"PRIx64" - 0x%"PRIx64" to 0x%"PRIx64" - 0x%"PRIx64"\n",
-		    elf_prog->name,
-		    (uint64_t)phdr->p_offset,
-		    (uint64_t)phdr->p_offset + phdr->p_filesz,
-		    (uint64_t)vastart,
-		    (uint64_t)vastart + (uint64_t)phdr->p_filesz);
-
-	vaend_old = PAGE_ALIGN_UP(vastart_old + mmap_len);
-	vaend_new = PAGE_ALIGN_UP(vastart + phdr->p_filesz);
-	if (vaend_old - vaend_new) {
-		rc = munmap((void *)vaend_new, vaend_old - vaend_new);
-		if (unlikely(rc)) {
-			uk_pr_err("Failed to unmap [vaend_new, vaend_old)\n");
-			return rc;
-		}
-	}
-
-	elf_prog->start = vastart;
+	vastart = ALIGN_UP(vastart, elf_prog->align);
 	elf_prog->vabase = (void *)vastart;
 	/* We got ehdr.e_entry added initially at the start of elf_load_fd() */
 	elf_prog->entry += (uintptr_t)elf_prog->vabase;
@@ -461,8 +430,27 @@ static int do_elf_load_fdphdr_0(struct elf_prog *elf_prog,
 		    (uint64_t)elf_prog->vabase,
 		    (uint64_t)elf_prog->vabase + elf_prog->valen);
 
+
+	vastart = (uintptr_t)mmap((void *)vastart + phdr->p_paddr,
+				  phdr->p_filesz,
+				  PROT_EXEC | PROT_READ | PROT_WRITE,
+				  MAP_PRIVATE | MAP_FIXED,
+				  fd, phdr->p_offset);
+	if (unlikely(vastart == (uintptr_t)MAP_FAILED)) {
+		uk_pr_err("Failed to mmap first phdr\n");
+		return (int)vastart;
+	}
+	elf_prog->start = vastart;
+
+	uk_pr_debug("%s: Memory mapped 0x%"PRIx64" - 0x%"PRIx64" to 0x%"PRIx64" - 0x%"PRIx64"\n",
+		    elf_prog->name,
+		    (uint64_t)phdr->p_offset,
+		    (uint64_t)phdr->p_offset + phdr->p_filesz,
+		    (uint64_t)vastart,
+		    (uint64_t)vastart + (uint64_t)phdr->p_filesz);
+
 	/* mmap anonymously what we are left if memsz > filesz */
-	vastart = vastart + phdr->p_filesz;
+	vastart += phdr->p_filesz;
 	vaend = PAGE_ALIGN_UP(vastart + (phdr->p_memsz - phdr->p_filesz));
 	if (vaend > vastart) {
 		rc = elf_load_mmap_filesz_memsz_diff(elf_prog, phdr,
@@ -523,7 +511,7 @@ static int do_elf_load_fdphdr_not0(struct elf_prog *elf_prog,
 	}
 
 	/* mmap anonymously what we are left if memsz > filesz */
-	vastart = vastart + phdr->p_filesz + delta_p_offset;
+	vastart += phdr->p_filesz + delta_p_offset;
 	vaend = PAGE_ALIGN_UP(vastart + (phdr->p_memsz - phdr->p_filesz));
 	if (vaend > vastart) {
 		rc = elf_load_mmap_filesz_memsz_diff(elf_prog, phdr,
