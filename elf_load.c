@@ -202,14 +202,6 @@ static int elf_load_parse(struct elf_prog *elf_prog, Elf *elf)
 	uk_pr_debug("%s: base: pie + 0x%"PRIx64", len: 0x%"PRIx64"\n",
 		    elf_prog->name, elf_prog->lowerl, elf_prog->upperl - elf_prog->lowerl);
 
-	/* We do not support yet an img base other than 0 */
-	if (unlikely(elf_prog->lowerl != 0)) {
-		elferr_err("%s: Image base is not 0x0, unsupported\n",
-			   elf_prog->name);
-		ret = -ENOEXEC;
-		goto err_out;
-	}
-
 	elf_prog->phdr.off = ehdr.e_phoff;
 	elf_prog->phdr.num = ehdr.e_phnum;
 	elf_prog->phdr.entsize = ehdr.e_phentsize;
