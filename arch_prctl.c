@@ -110,19 +110,19 @@ static inline __uptr readgs(void)
 }
 #endif
 
-UK_LLSYSCALL_R_DEFINE(long, arch_prctl, long, code, long, addr, long, arg2)
+UK_LLSYSCALL_R_U_DEFINE(long, arch_prctl, long, code, long, addr, long, arg2)
 {
 	switch(code) {
 		case ARCH_SET_GS:
 			uk_pr_debug("arch_prctl option SET_GS(%p)\n",
 				    (void *) addr);
-			writegs((__uptr) addr);
+			ukarch_sysregs_set_gs_base(&usc->sysregs, (__uptr)addr);
 			return 0;
 
 		case ARCH_SET_FS:
 			uk_pr_debug("arch_prctl option SET_FS(%p)\n",
 				    (void *) addr);
-			_uk_syscall_ultlsp = (__uptr)addr;
+			ukarch_sysregs_set_tlsp(&usc->sysregs, (__uptr)addr);
 			return 0;
 
 		case ARCH_GET_GS: {
@@ -130,7 +130,8 @@ UK_LLSYSCALL_R_DEFINE(long, arch_prctl, long, code, long, addr, long, arg2)
 				    (void *) addr);
 			if (!addr)
 				return -EINVAL;
-			*((long *) addr) = readgs();
+			*((long *)addr) =
+				      ukarch_sysregs_get_gs_base(&usc->sysregs);
 			return 0;
 		}
 
@@ -139,7 +140,8 @@ UK_LLSYSCALL_R_DEFINE(long, arch_prctl, long, code, long, addr, long, arg2)
 				    (void *) addr);
 			if (!addr)
 				return -EINVAL;
-			*((long *) addr) = _uk_syscall_ultlsp;
+			*((long *)addr) =
+					 ukarch_sysregs_get_tlsp(&usc->sysregs);
 			return 0;
 		}
 
