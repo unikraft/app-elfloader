@@ -184,6 +184,8 @@ int main(int argc, char *argv[])
 						uk_alloc_get_default(),
 				 PAGES2BYTES(CONFIG_APPELFLOADER_STACK_NBPAGES),
 						uk_alloc_get_default(),
+						0,
+						uk_alloc_get_default(),
 						false,
 						progname,
 						NULL, NULL);
