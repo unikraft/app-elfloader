@@ -67,6 +67,20 @@
 #include "libelf_helper.h"
 #include "elf_prog.h"
 
+static int get_phdr_mmap_prot(GElf_Phdr *phdr)
+{
+	int mmap_prot = 0;
+
+	if (phdr->p_flags & PF_R)
+		mmap_prot |= PROT_READ;
+	if (phdr->p_flags & PF_W)
+		mmap_prot |= PROT_WRITE;
+	if (phdr->p_flags & PROT_EXEC)
+		mmap_prot |= PROT_EXEC;
+
+	return mmap_prot;
+}
+
 /*
  * Checks that ELF headers are valid and supported and
  * computes the size of needed virtual memory space for the image
@@ -343,22 +357,25 @@ static int elf_load_mmap_filesz_memsz_diff(struct elf_prog *elf_prog,
 {
 	UK_ASSERT(elf_prog && phdr && vastart && vaend);
 
-	uk_pr_debug("%s: Zeroing 0x%"PRIx64" - 0x%"PRIx64"\n",
-		    elf_prog->name,
-		    (uint64_t)(vastart),
-		    (uint64_t)(vaend));
+	/* Only zero if we have write permissions! */
+	if (phdr->p_flags & PF_W) {
+		uk_pr_debug("%s: Zeroing 0x%"PRIx64" - 0x%"PRIx64"\n",
+			    elf_prog->name,
+			    (uint64_t)(vastart),
+			    (uint64_t)(vaend));
 
-	/* From the last byte contained in filesz to the last
-	 * byte contained in memsz, we can either have:
-	 * 1. a page alignment adjustment, where the end
-	 * address is just PAGE_ALIGN_UP(paddr + filesz), which
-	 * means that our initial call to mmap already read in
-	 * a page for us whose remaining bytes we memset without
-	 * generating a page fault, because
-	 * vaend - vastart < PAGE_SIZE
-	 * ...
-	 */
-	memset((void *)vastart, 0, PAGE_ALIGN_UP(vastart) - vastart);
+		/* From the last byte contained in filesz to the last
+		 * byte contained in memsz, we can either have:
+		 * 1. a page alignment adjustment, where the end
+		 * address is just PAGE_ALIGN_UP(paddr + filesz), which
+		 * means that our initial call to mmap already read in
+		 * a page for us whose remaining bytes we memset without
+		 * generating a page fault, because
+		 * vaend - vastart < PAGE_SIZE
+		 * ...
+		 */
+		memset((void *)vastart, 0, PAGE_ALIGN_UP(vastart) - vastart);
+	}
 
 	if (vaend == PAGE_ALIGN_UP(vastart))
 		return 0;
@@ -373,7 +390,7 @@ static int elf_load_mmap_filesz_memsz_diff(struct elf_prog *elf_prog,
 	 */
 	vastart = PAGE_ALIGN_UP(vastart);
 	vastart = (uintptr_t)mmap((void *)vastart, vaend - vastart,
-				  PROT_EXEC | PROT_READ | PROT_WRITE,
+				  get_phdr_mmap_prot(phdr),
 				  MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS,
 				  -1, 0);
 	if (unlikely(vastart == (uintptr_t)MAP_FAILED)) {
@@ -405,7 +422,7 @@ static int do_elf_load_fdphdr_0(struct elf_prog *elf_prog,
 	 * mapping.
 	 */
 	vastart = (uintptr_t)mmap(NULL, mmap_len,
-				  PROT_EXEC | PROT_READ | PROT_WRITE,
+				  get_phdr_mmap_prot(phdr),
 				  MAP_PRIVATE | MAP_ANONYMOUS,
 				  -1, 0);
 	if (unlikely(vastart == (uintptr_t)MAP_FAILED)) {
@@ -435,7 +452,7 @@ static int do_elf_load_fdphdr_0(struct elf_prog *elf_prog,
 
 	vastart = (uintptr_t)mmap((void *)vastart + phdr->p_vaddr,
 				  phdr->p_filesz,
-				  PROT_EXEC | PROT_READ | PROT_WRITE,
+				  get_phdr_mmap_prot(phdr),
 				  MAP_PRIVATE | MAP_FIXED,
 				  fd, phdr->p_offset);
 	if (unlikely(vastart == (uintptr_t)MAP_FAILED)) {
@@ -503,7 +520,7 @@ static int do_elf_load_fdphdr_not0(struct elf_prog *elf_prog,
 	 * be manually re-adjusted later.
 	 */
 	vastart = (uintptr_t)mmap(addr, phdr->p_filesz + delta_p_offset,
-				  PROT_EXEC | PROT_READ | PROT_WRITE,
+				  get_phdr_mmap_prot(phdr),
 				  MAP_FIXED | MAP_PRIVATE,
 				  fd, phdr->p_offset - delta_p_offset);
 	if (unlikely(vastart == (uintptr_t)MAP_FAILED)) {
@@ -966,12 +983,15 @@ static struct elf_prog *do_elf_load_vfs(struct uk_alloc *a, const char *path,
 		goto err_free_elf_prog;
 	}
 
+	/* This is already ensured by the `mmap` flags */
+#if !CONFIG_LIBPOSIX_MMAP
 	ret = elf_load_ptprotect(elf_prog, elf);
 	if (unlikely(ret < 0)) {
 		uk_pr_err("%s: Failed to set page protection bits: %d\n",
 			  progname, ret);
 		goto err_unload_vaimg;
 	}
+#endif /* !CONFIG_LIBPOSIX_MMAP */
 
 	elf_end(elf);
 	close(fd);
