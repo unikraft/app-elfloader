@@ -88,9 +88,9 @@ struct auxv_entry {
 	long val;
 };
 
-#if CONFIG_VDSO
+#if CONFIG_APPELFLOADER_VDSO
 extern char *vdso_image_addr;
-#endif
+#endif /* CONFIG_APPELFLOADER_VDSO */
 
 #if CONFIG_ARCH_X86_64
 	static const char *auxv_platform = "x86_64";
@@ -165,9 +165,9 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		{ AT_PHENT, prog->phdr.entsize },
 		{ AT_PHNUM, prog->phdr.num },
 		{ AT_PHDR, (__uptr)prog->vabase + prog->phdr.off },
-#if CONFIG_VDSO
-		{ AT_SYSINFO_EHDR, (long)vdso_image_addr},
-#endif
+#if CONFIG_APPELFLOADER_VDSO
+		{ AT_SYSINFO_EHDR, (uintptr_t)vdso_image_addr },
+#endif /* CONFIG_APPELFLOADER_VDSO */
 		{ AT_IGNORE, 0x0 }
 	};
 	struct auxv_entry auxv_null = { AT_NULL, 0x0 };
