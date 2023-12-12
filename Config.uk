@@ -101,8 +101,11 @@ config APPELFLOADER_DEBUG
        bool "Enable debug messages"
        default n
 
-config VDSO
-	bool "Provide VDSO Image"
+config APPELFLOADER_VDSO
+	bool "Provide VDSO"
 	default n
 	help
-		Provide a VDSO image in the kernel, and pass it to the application
+		Provides a VDSO image to ELF applications. The VDSO
+		works like a shared libary for the application but in the case
+		of Unikraft it provides function addresses for directly calling
+		(some) system call handlers.
