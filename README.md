@@ -53,7 +53,7 @@ For building and running everything, follow the steps below.
 git clone https://github.com/unikraft/dynamic-apps
 git clone https://github.com/unikraft/app-elfloader elfloader
 cd elfloader/
-./script/setup.sh
+./scripts/setup.sh
 wget https://raw.githubusercontent.com/unikraft/app-testing/staging/scripts/generate.py -O scripts/generate.py
 chmod a+x scripts/generate.py
 ./scripts/generate.py
