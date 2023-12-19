@@ -109,3 +109,33 @@ config APPELFLOADER_VDSO
 		works like a shared libary for the application but in the case
 		of Unikraft it provides function addresses for directly calling
 		(some) system call handlers.
+
+menuconfig APPELFLOADER_AUTOGEN
+	bool "Auto-generate configuration files (HFS)"
+	depends on LIBVFSCORE
+	default y
+	help
+		Automatically generate configuration files according to the
+		Filesystem Hierarchy Standard (HFS) during initialization.
+
+if APPELFLOADER_AUTOGEN
+choice
+	prompt "Creation mode"
+	default APPELFLOADER_AUTOGEN_SKIPEXIST
+
+	config APPELFLOADER_AUTOGEN_SKIPEXIST
+		bool "Skip files that already exists"
+		help
+			Only emits a message if a file already exists in the filesystem.
+
+	config APPELFLOADER_AUTOGEN_ERROREXIST
+		bool "Stop with an error message if a file already exists"
+		help
+			Emits an error if a file already exists in the filesystem.
+
+	config APPELFLOADER_AUTOGEN_REPLACEEXIST
+		bool "Overwrite existing files"
+		help
+			If a configuration file was already found in the filesystem
+endchoice
+endif
