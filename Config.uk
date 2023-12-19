@@ -119,6 +119,20 @@ menuconfig APPELFLOADER_AUTOGEN
 		Filesystem Hierarchy Standard (HFS) during initialization.
 
 if APPELFLOADER_AUTOGEN
+menu "/etc: Host-specific configuration files"
+	config APPELFLOADER_AUTOGEN_ETCRESOLVCONF
+		bool "./resolv.conf: DNS resolver settings"
+		depends on LIBUKNETDEV
+		imply LIBUKNETDEV_EINFO
+		default y
+		help
+			Generates "/etc/resolv.conf" based on available uknetdev einfo
+			fields: DNS server and DNS domain. Please note that these are
+			statically assigned network configuration options (for instance
+			via kernel parameter). If DHCP should be taken into account,
+			the selected network stack should generate this file instead.
+endmenu
+
 choice
 	prompt "Creation mode"
 	default APPELFLOADER_AUTOGEN_SKIPEXIST
