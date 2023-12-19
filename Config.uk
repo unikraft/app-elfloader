@@ -148,6 +148,16 @@ menu "/etc: Host-specific configuration files"
 		bool "Resolution entry for localhost (127.0.0.1)"
 		depends on APPELFLOADER_AUTOGEN_ETCHOSTS
 		default y if !LIBLWIP || LWIP_LOOPIF
+
+	config APPELFLOADER_AUTOGEN_ETCHOSTNAME
+		bool "./hostname: System hostname"
+		depends on LIBUKNETDEV
+		imply LIBUKNETDEV_EINFO
+		help
+			Generates "/etc/hostname" based on the first found statically
+			assigned hostname (einfo) that can be set by a uknetdev device.
+			Please note if DHCP should be taken into account, the selected
+			network stack should generate this file instead.
 endmenu
 
 choice
