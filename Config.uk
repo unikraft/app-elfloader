@@ -131,6 +131,23 @@ menu "/etc: Host-specific configuration files"
 			statically assigned network configuration options (for instance
 			via kernel parameter). If DHCP should be taken into account,
 			the selected network stack should generate this file instead.
+
+	config APPELFLOADER_AUTOGEN_ETCHOSTS
+		bool "./hosts: Static hostname resolution"
+		depends on LIBUKNETDEV
+		imply LIBUKNETDEV_EINFO
+		default y
+		help
+			Generates "/etc/hosts" based on available uknetdev einfo fields:
+			hostname, domain suffix, and IPv4 address. Please note that these
+			are statically assigned network configuration options (for instance
+			via kernel parameter). If DHCP should be taken into account, the
+			selected network stack should generate this file instead.
+
+	config APPELFLOADER_AUTOGEN_ETCHOSTS_LOCALHOST4
+		bool "Resolution entry for localhost (127.0.0.1)"
+		depends on APPELFLOADER_AUTOGEN_ETCHOSTS
+		default y if !LIBLWIP || LWIP_LOOPIF
 endmenu
 
 choice
