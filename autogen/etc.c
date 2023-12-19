@@ -210,6 +210,42 @@ out:
 	return rc;
 }
 
+static int gen_etc_hostname(const char *fpath, mode_t fmode)
+{
+	int rc = 0;
+#if CONFIG_APPELFLOADER_AUTOGEN_ETCHOSTNAME
+	struct uk_netdev *nd;
+	const char *hostname;
+	int fd;
+
+	/* Detect a primary hostname */
+	hostname = NULL;
+	nd = uk_netdev_find_einfo(UK_NETDEV_IPV4_HOSTNAME);
+	if (nd)
+		hostname = uk_netdev_einfo_get(nd, UK_NETDEV_IPV4_HOSTNAME);
+
+	if (!hostname || hostname[0] == '\0') {
+		uk_pr_warn("No primary hostname detected, skip creating %s\n",
+			   fpath);
+		return 0;
+	}
+
+	fd = cf_create(fpath, fmode);
+#if CONFIG_APPELFLOADER_AUTOGEN_SKIPEXIST
+	if (fd == -EEXIST)
+		return 0;
+#endif /* CONFIG_APPELFLOADER_AUTOGEN_SKIPEXIST */
+	if (unlikely(fd < 0))
+		return fd;
+	rc = cf_nprintf(fd, 128, "%s\n", hostname);
+	if (likely(rc > 0))
+		rc = 0;
+
+	cf_close(fd);
+#endif /* CONFIG_APPELFLOADER_AUTOGEN_ETCHOSTNAME */
+	return rc;
+}
+
 static int gen_etc(struct uk_init_ctx *ictx __unused)
 {
 	int rc;
@@ -223,6 +259,10 @@ static int gen_etc(struct uk_init_ctx *ictx __unused)
 		goto out;
 
 	rc = gen_etc_hosts("/etc/hosts", 0644);
+	if (unlikely((rc < 0)))
+		goto out;
+
+	rc = gen_etc_hostname("/etc/hostname", 0444);
 	if (unlikely((rc < 0)))
 		goto out;
 
