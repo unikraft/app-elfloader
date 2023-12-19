@@ -31,6 +31,8 @@ $(APPELFLOADER_BUILD)/vdso-image.c: $(APPELFLOADER_BUILD)/libvdso.so $(APPELFLOA
 	$(call build_cmd,PYTHON,appelfloader,$(notdir $@), \
 		$(PYTHON) $(APPELFLOADER_BASE)/vdso/bin2c.py $(APPELFLOADER_BASE)/vdso/vdso_mapping.conf $< $@)
 
+APPELFLOADER_SRCS-$(CONFIG_APPELFLOADER_AUTOGEN) += $(APPELFLOADER_BASE)/autogen/conffile.c
+
 APPELFLOADER_CLEAN += $(APPELFLOADER_BUILD)/vdso.o
 APPELFLOADER_CLEAN += $(APPELFLOADER_BUILD)/vdso.patched.o
 APPELFLOADER_CLEAN += $(APPELFLOADER_BUILD)/libvdso.so
