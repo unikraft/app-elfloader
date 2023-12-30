@@ -997,8 +997,10 @@ static struct elf_prog *do_elf_load_vfs(struct uk_alloc *a, const char *path,
 	close(fd);
 	return elf_prog;
 
+#if !CONFIG_LIBPOSIX_MMAP
 err_unload_vaimg:
 	elf_unload_vaimg(elf_prog);
+#endif /* !CONFIG_LIBPOSIX_MMAP */
 err_free_elf_prog:
 	uk_free(a, elf_prog);
 err_end_elf:
