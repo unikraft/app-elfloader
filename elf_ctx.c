@@ -46,6 +46,7 @@
  * header of this file.
  */
 
+#include <string.h>
 #include <uk/plat/bootstrap.h>
 #include <uk/assert.h>
 #include <uk/print.h>
@@ -93,18 +94,48 @@ extern char *vdso_image_addr;
 #endif /* CONFIG_APPELFLOADER_VDSO */
 
 #if CONFIG_ARCH_X86_64
-	static const char *auxv_platform = "x86_64";
+#define UK_AUXV_PLATFORM	"x86_64"
 #elif CONFIG_ARCH_ARM_64
-	static const char *auxv_platform = "aarch64";
+#define UK_AUXV_PLATFORM	"aarch64"
 #else
 #error "Unsupported architecture"
 #endif
+
+static void infoblk_push(struct ukarch_ctx *ctx, void *buf, __sz len)
+{
+	UK_ASSERT(ctx);
+	UK_ASSERT(ctx->sp);
+	UK_ASSERT(buf);
+	UK_ASSERT(len);
+
+	ctx->sp -= len + 1;
+	memcpy((void *)ctx->sp, buf, len);
+	((char *)ctx->sp)[len] = '\0';
+}
+
+static int envp_count(char *environ[])
+{
+	int envc = 0;
+	char **env;
+
+	if (!environ)
+		return 0;
+
+	/* count the number of environment variables */
+	for (env = environ; *env; ++env)
+		++envc;
+
+	return envc;
+}
 
 void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		  const char *argv0, int argc, char *argv[], char *environ[],
 		  uint64_t rand[2])
 {
-	int i, envc, elfvec_len;
+	int i, elfvec_len, envc = envp_count(environ);
+	int args_count = argc + (argv0 ? 1 : 0);
+	char *infoblk_argvp[args_count];
+	char *infoblk_envp[envc];
 
 	UK_ASSERT(prog);
 	UK_ASSERT(argv0 || ((argc >= 1) && argv));
@@ -133,15 +164,17 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 			    (uint64_t) prog->interp.prog->entry);
 	}
 
-	/* count the number of environment variables */
-	envc = 0;
-	if (environ)
-		for (char **env = environ; *env; ++env)
-			++envc;
+	/* list of all auxiliary vector entries whose pointer values need
+	 * to point to information block areas
+	 */
+	struct auxv_entry infoblk_auxv[] = {
+		{ AT_PLATFORM, (__uptr)UK_AUXV_PLATFORM	},
+	};
 
-	/* list of all auxiliary vector entries */
+	/* list of all auxiliary vector entries whose pointer values need
+	 * not be in the information block
+	 */
 	struct auxv_entry auxv[] = {
-		{ AT_PLATFORM, (uintptr_t) auxv_platform },
 		{ AT_NOTELF, 0x0 },
 		{ AT_UCACHEBSIZE, 0x0 },
 		{ AT_ICACHEBSIZE, 0x0 },
@@ -166,11 +199,50 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		{ AT_PHNUM, prog->phdr.num },
 		{ AT_PHDR, (__uptr)prog->vabase + prog->phdr.off },
 #if CONFIG_APPELFLOADER_VDSO
+		/* TODO: This must also be pushed and copied
+		 * or mapped to information block. Move it to infoblk_auxv
+		 * ASAP.
+		 */
 		{ AT_SYSINFO_EHDR, (uintptr_t)vdso_image_addr },
 #endif /* CONFIG_APPELFLOADER_VDSO */
 		{ AT_IGNORE, 0x0 }
 	};
 	struct auxv_entry auxv_null = { AT_NULL, 0x0 };
+
+	for (i = (int)ARRAY_SIZE(infoblk_auxv) - 1; i >= 0; i--) {
+		infoblk_push(ctx, (void *)infoblk_auxv[i].val,
+			     strlen((const char*)infoblk_auxv[i].val));
+		/* Overwrite previous pointer to our memory to a pointer to
+		 * the newly copied buffer in the information block.
+		 */
+		infoblk_auxv[i].val = ctx->sp;
+	}
+
+	if (envc)
+		for (i = envc - 1; i >= 0; i--) {
+			infoblk_push(ctx, environ[i], strlen(environ[i]));
+			infoblk_envp[i] = (char *)ctx->sp;
+		}
+
+	if (argc)
+		for (i = argc; i >= 1; i--) {
+			infoblk_push(ctx, argv[i - 1], strlen(argv[i - 1]));
+			infoblk_argvp[i] = (char *)ctx->sp;
+		}
+
+	if (argv0) {
+		infoblk_push(ctx, (void *)argv0, strlen(argv0));
+		infoblk_argvp[0] = (char *)ctx->sp;
+	}
+
+	/* Add a NULL terminator before argv0 as the cherry on top (bottom?)
+	 * and re-align stack to prepare it for what's about to be pushed
+	 * next.
+	 */
+	ctx->sp--;
+	((char *)ctx->sp)[0] = '\0';
+	ctx->sp--;
+	ctx->sp = ALIGN_DOWN(ctx->sp, UKARCH_SP_ALIGN);
 
 	/*
 	 * We need to respect the stack alignment ABI requirements at function
@@ -196,18 +268,21 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 	 * Auxiliary vector (NOTE: we push the terminating NULL first)
 	 */
 	ukarch_rctx_stackpush_packed(ctx, auxv_null);
-	for (i = (int) ARRAY_SIZE(auxv) - 1; i >= 0; --i)
+	for (i = (int)ARRAY_SIZE(infoblk_auxv) - 1; i >= 0; i--)
+		ukarch_rctx_stackpush_packed(ctx, infoblk_auxv[i]);
+	for (i = (int)ARRAY_SIZE(auxv) - 1; i >= 0; --i)
 		ukarch_rctx_stackpush_packed(ctx, auxv[i]);
 
 	/*
 	 * envp
 	 */
 	/* NOTE: As expected, this will push NULL to the stack first */
-	ukarch_rctx_stackpush_packed(ctx, (long) NULL);
+	ukarch_rctx_stackpush_packed(ctx, (long)NULL);
 	if (environ) {
-		for (i = envc-1; i >= 0; --i) {
-			uk_pr_debug("env[%d]=\"%s\"\n", i, environ[i]);
-			ukarch_rctx_stackpush_packed(ctx, (uintptr_t) environ[i]);
+		for (i = envc - 1; i >= 0; --i) {
+			uk_pr_debug("env[%d]=\"%s\"\n", i, infoblk_envp[i]);
+			ukarch_rctx_stackpush_packed(ctx,
+						     (__uptr)infoblk_envp[i]);
 		}
 	}
 
@@ -215,13 +290,12 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 	 * argv + argc
 	 */
 	/* Same as envp, pushing NULL first */
-	ukarch_rctx_stackpush_packed(ctx, (long) NULL);
-	if (argc)
-		for (i = argc - 1; i >= 0; --i)
-			ukarch_rctx_stackpush_packed(ctx, (uintptr_t) argv[i]);
-	if (argv0)
-		ukarch_rctx_stackpush_packed(ctx, (uintptr_t) argv0);
-	ukarch_rctx_stackpush_packed(ctx, (long) argc + (argv0 ? 1 : 0));
+	ukarch_rctx_stackpush_packed(ctx, (long)NULL);
+	if (args_count)
+		for (i = args_count - 1; i >= 0; i--)
+			ukarch_rctx_stackpush_packed(ctx,
+						     (__uptr)infoblk_argvp[i]);
+	ukarch_rctx_stackpush_packed(ctx, (long)args_count);
 
 	UK_ASSERT(IS_ALIGNED(ctx->sp, UKARCH_SP_ALIGN));
 
