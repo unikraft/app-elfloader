@@ -37,7 +37,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <limits.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <uk/errptr.h>
 #include <uk/essentials.h>
 #include <uk/plat/memory.h>
@@ -49,6 +51,10 @@
 #if CONFIG_LIBUKSWRAND
 #include <uk/swrand.h>
 #endif /* CONFIG_LIBUKSWRAND */
+#if CONFIG_APPELFLOADER_VFSEXEC_ENVPATH
+#include <uk/argparse.h>
+#include <uk/streambuf.h>
+#endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPATH */
 
 #include "elf_prog.h"
 
@@ -92,6 +98,80 @@ again:
 	return ++bn;
 }
 
+#if CONFIG_APPELFLOADER_VFSEXEC_ENVPATH
+/*
+ * Routine that locates an executable in a colon-separated list of directories.
+ * On success, it returns a malloc'ed C-string containing the full path. It is
+ * in the responsibility of the caller to free the string after use with
+ * `free()`.
+ */
+static inline char *locate_exec(const char *basename, const char *path_env)
+{
+	struct uk_streambuf sb;
+	const char *path_next;
+	const char *path_cur;
+	size_t path_cur_len;
+	struct stat f_stat;
+	char *buf;
+	int err;
+
+	if (!basename || basename[0] == '/' || basename[0] == '.') {
+		/* no name given, absolute, or cwd-relative */
+		err = -EINVAL;
+		goto err_out;
+	}
+
+	buf = malloc(PATH_MAX);
+	if (!buf) {
+		err = -ENOMEM;
+		goto err_out;
+	}
+
+	/* Iterate over paths */
+	path_cur  = path_env;
+	path_next = path_env;
+	while (path_next) {
+		path_cur     = path_next;
+		path_cur_len = uk_nextarg_r(&path_next, ':');
+
+		uk_streambuf_init(&sb, buf, PATH_MAX, UK_STREAMBUF_C_TERMSHIFT);
+		uk_streambuf_memcpy(&sb, path_cur, path_cur_len);
+		if (path_cur_len > 0)
+			uk_streambuf_reserve(&sb, 2); /* last byte of memcpy
+						       * and 1 byte of reserve
+						       * would be overwritten by
+						       * successive strcpy calls
+						       */
+		uk_streambuf_strcpy(&sb, "/");
+		uk_streambuf_strcpy(&sb, basename);
+		if (uk_streambuf_istruncated(&sb)) {
+			err = -ENOSPC;
+			goto err_free_buf;
+		}
+		uk_pr_debug("Looking for executable under %s...\n",
+			    (char *)uk_streambuf_buf(&sb));
+		if (stat((char *)uk_streambuf_buf(&sb), &f_stat) != 0)
+			continue; /* file not found */
+		if (unlikely(!(f_stat.st_mode & S_IFREG)))
+			continue; /* found but not a file */
+#if CONFIG_APPELFLOADER_VFSEXEC_EXECBIT
+		if (unlikely(!(f_stat.st_mode & (S_IXUSR | S_IFREG))))
+			continue; /* found but not an executable */
+#endif /* !CONFIG_APPELFLOADER_VFSEXEC_EXECBIT */
+
+		uk_pr_debug("+ Found.\n");
+		return buf;
+	}
+
+	uk_pr_debug("No executable found for %s\n", basename);
+	err = -ENOENT;
+err_free_buf:
+	free(buf);
+err_out:
+	return ERR2PTR(err);
+}
+#endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPATH */
+
 /*
  * Init libelf
  */
@@ -107,6 +187,7 @@ int main(int argc, char *argv[])
 	int rc;
 #else /* CONFIG_APPELFLOADER_VFSEXEC */
 	const char *path;
+	char *realpath = NULL;
 	/* reference of strdup()'ed `path` that is converted into `progname` */
 	char *progname_conv = NULL;
 #endif /* CONFIG_APPELFLOADER_VFSEXEC */
@@ -115,6 +196,9 @@ int main(int argc, char *argv[])
 	struct uk_thread *app_thread;
 	uint64_t rand[2];
 	int ret = 0;
+#if CONFIG_APPELFLOADER_VFSEXEC_ENVPATH
+	char *env_path;
+#endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPATH */
 
 	/*
 	 * Prepare `progname` (and `path`) from command line
@@ -204,8 +288,28 @@ int main(int argc, char *argv[])
 	prog = elf_load_img(uk_alloc_get_default(), (void *) img->vbase,
 			    img->len, progname);
 #else /* CONFIG_APPELFLOADER_VFSEXEC */
-	uk_pr_debug("%s: Load executable (%s)...\n", progname, path);
-	prog = elf_load_vfs(uk_alloc_get_default(), path, progname);
+#if CONFIG_APPELFLOADER_VFSEXEC_ENVPATH
+	env_path = getenv("PATH");
+	if (env_path) {
+		realpath = locate_exec(path, env_path);
+		if (PTR2ERR(realpath) == -EINVAL) {
+			realpath = NULL;
+		} else if (PTRISERR(realpath) && PTR2ERR(realpath) != -EINVAL) {
+			uk_pr_err("%s: Failed to find executable in envirenment ($PATH): %s (%d)",
+				  progname, strerror(-PTR2ERR(realpath)),
+				  PTR2ERR(realpath));
+			goto out_free_thread;
+		}
+	}
+#endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPATH */
+	uk_pr_debug("%s: Load executable (%s)...\n",
+		    progname, realpath ? realpath : path);
+	prog = elf_load_vfs(uk_alloc_get_default(),
+			    realpath ? realpath : path, progname);
+#if CONFIG_APPELFLOADER_VFSEXEC_ENVPATH
+	if (realpath)
+		free(realpath);
+#endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPATH */
 #endif /* CONFIG_APPELFLOADER_VFSEXEC */
 	if (unlikely(PTRISERR(prog) || !prog)) {
 		ret = -errno;
