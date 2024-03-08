@@ -199,6 +199,9 @@ int main(int argc, char *argv[])
 #if CONFIG_APPELFLOADER_VFSEXEC_ENVPATH
 	char *env_path;
 #endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPATH */
+#if CONFIG_APPELFLOADER_VFSEXEC_ENVPWD
+	char *env_pwd;
+#endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPWD */
 
 	/*
 	 * Prepare `progname` (and `path`) from command line
@@ -279,6 +282,23 @@ int main(int argc, char *argv[])
 		ret = 1;
 		goto out;
 	}
+
+#if CONFIG_APPELFLOADER_VFSEXEC_ENVPWD
+	/*
+	 * Set working directory if `PWD` env variable is set
+	 * FIXME: Remotely set this for target thread
+	 */
+	env_pwd = getenv("PWD");
+	if (env_pwd) {
+		uk_pr_debug("%s: Changing working directory to '%s'\n",
+			    progname, env_pwd);
+		if (chdir(env_pwd) < 0) {
+			uk_pr_err("%s: Failed to change working directory to '%s': %s (%d)\n",
+				  progname, env_pwd, strerror(errno), errno);
+			goto out_free_thread;
+		}
+	}
+#endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPWD */
 
 	/*
 	 * Parse image
