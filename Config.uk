@@ -78,6 +78,14 @@ config APPELFLOADER_VFSEXEC_ENVPATH
 		Searches for the executable in a set of directories specified
 		with the PATH environment variable.
 
+config APPELFLOADER_VFSEXEC_ENVPWD
+       bool "Set working directory to PWD"
+       default y
+       depends on LIBPOSIX_ENVIRON
+       help
+		If the environment variable PWD is set, the working
+		directory is changed to the given path.
+
 config APPELFLOADER_VFSEXEC_EXECBIT
 	bool "Ensure executable bit"
 	default y
