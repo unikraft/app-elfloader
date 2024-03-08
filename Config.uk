@@ -18,6 +18,7 @@ config APPELFLOADER_DEPENDENCIES
 	imply LIBPOSIX_SYSINFO
 	imply LIBPOSIX_USER
 	imply LIBUKSWRAND
+	imply LIBPOSIX_ENVIRON
 
 ### App configuration
 choice
@@ -64,6 +65,18 @@ config APPELFLOADER_VFSEXEC_PATH
 	depends on !APPELFLOADER_CUSTOMAPPNAME
 	help
 		Compiled-in path to executable on the VFS.
+
+config APPELFLOADER_VFSEXEC_ENVPATH
+	bool "Locate executable with PATH"
+	default y
+	depends on APPELFLOADER_CUSTOMAPPNAME
+	depends on LIBPOSIX_ENVIRON
+	imply APPELFLOADER_VFSEXEC_EXECBIT
+	select LIBUKSTREAMBUF
+	select LIBUKARGPARSE
+	help
+		Searches for the executable in a set of directories specified
+		with the PATH environment variable.
 
 config APPELFLOADER_VFSEXEC_EXECBIT
 	bool "Ensure executable bit"
