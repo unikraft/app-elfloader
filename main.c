@@ -194,6 +194,7 @@ int main(int argc, char *argv[])
 	const char *progname;
 	struct elf_prog *prog;
 	struct uk_thread *app_thread;
+	struct uk_sched *s = uk_sched_current();
 	uint64_t rand[2];
 	int ret = 0;
 #if CONFIG_APPELFLOADER_VFSEXEC_ENVPATH
@@ -202,6 +203,8 @@ int main(int argc, char *argv[])
 #if CONFIG_APPELFLOADER_VFSEXEC_ENVPWD
 	char *env_pwd;
 #endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPWD */
+
+	UK_ASSERT(s);
 
 	/*
 	 * Prepare `progname` (and `path`) from command line
@@ -268,11 +271,11 @@ int main(int argc, char *argv[])
 	 * It will have a new stack and an ukarch_ctx
 	 */
 	app_thread = uk_thread_create_container(uk_alloc_get_default(),
-						uk_alloc_get_default(),
+						s->a_stack,
 				 PAGES2BYTES(CONFIG_APPELFLOADER_STACK_NBPAGES),
-						uk_alloc_get_default(),
+						s->a_auxstack,
 						0,
-						uk_alloc_get_default(),
+						s->a_uktls,
 						false,
 						progname,
 						NULL, NULL);
@@ -375,7 +378,7 @@ int main(int argc, char *argv[])
 	/*
 	 * Execute application
 	 */
-	uk_sched_thread_add(uk_sched_current(), app_thread);
+	uk_sched_thread_add(s, app_thread);
 
 	/*
 	 * FIXME: Instead of an infinite wait, wait for application
