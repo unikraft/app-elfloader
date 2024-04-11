@@ -46,6 +46,7 @@
  * header of this file.
  */
 
+#include <limits.h>
 #include <string.h>
 #include <uk/plat/bootstrap.h>
 #include <uk/assert.h>
@@ -113,29 +114,61 @@ static void infoblk_push(struct ukarch_ctx *ctx, void *buf, __sz len)
 	((char *)ctx->sp)[len] = '\0';
 }
 
-static int envp_count(char *environ[])
+int elf_arg_env_count(int *argc, const char **argv,
+		      int *envc, const char **envp,
+		      __sz stack_sz)
 {
-	int envc = 0;
-	char **env;
+	const char **a;
+	__sz len;
 
-	if (!environ)
+	*argc = *envc = len = 0;
+	if (!argv && !envp)
 		return 0;
 
-	/* count the number of environment variables */
-	for (env = environ; *env; ++env)
-		++envc;
+	/* count argv */
+	if (argv)
+		for (a = argv; *a; ++a) {
+			++*argc;
+			len += strlen(*a);
+		}
 
-	return envc;
+	/* count envp */
+	if (envp)
+		for (a = envp; *a; ++a) {
+			++*envc;
+			len += strlen(*a);
+		}
+
+	/* POSIX defines the minimum total size of argv + envp to ARG_MAX,
+	 * and leaves the inclusion of NULL terminators, pointers and / or
+	 * alignment bytes as implementation defined. The policy we implement
+	 * is:
+	 *
+	 * - Permit the total length to exceed ARG_MAX as long as it's not
+	 * greater than 1/4 of the stack size. This is essentially the same
+	 * policy as linux (see execve(2)), with the difference that we
+	 * don't apply the MAX_ARG_STRLEN floor of 32 pages.
+	 *
+	 * - Exclude auxv, NULL, alignment bytes from the checked size, as
+	 * these are of fixed size and occupy an insignificant portion of
+	 * the stack.
+	 */
+	UK_ASSERT(IS_ALIGNED(stack_sz, 4));
+	if (unlikely(len > ARG_MAX && len > stack_sz / 4))
+		return -E2BIG;
+
+	return len;
 }
 
 void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
-		  const char *argv0, int argc, char *argv[], char *environ[],
+		  const char *argv0, int argc, const char *argv[],
+		  int envc, const char *environ[],
 		  uint64_t rand[2])
 {
-	int i, elfvec_len, envc = envp_count(environ);
 	int args_count = argc + (argv0 ? 1 : 0);
 	char *infoblk_argvp[args_count];
 	char *infoblk_envp[envc];
+	int i, elfvec_len;
 
 	UK_ASSERT(prog);
 	UK_ASSERT(argv0 || ((argc >= 1) && argv));
@@ -220,13 +253,15 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 
 	if (envc)
 		for (i = envc - 1; i >= 0; i--) {
-			infoblk_push(ctx, environ[i], strlen(environ[i]));
+			infoblk_push(ctx, (void *)environ[i],
+				     strlen(environ[i]));
 			infoblk_envp[i] = (char *)ctx->sp;
 		}
 
 	if (argc)
 		for (i = argc; i >= 1; i--) {
-			infoblk_push(ctx, argv[i - 1], strlen(argv[i - 1]));
+			infoblk_push(ctx, (void *)argv[i - 1],
+				     strlen(argv[i - 1]));
 			infoblk_argvp[i] = (char *)ctx->sp;
 		}
 

@@ -59,7 +59,7 @@
 #include "elf_prog.h"
 
 #if CONFIG_LIBPOSIX_ENVIRON
-extern char **environ;
+extern const char **environ;
 #else /* !CONFIG_LIBPOSIX_ENVIRON */
 #define environ NULL
 #endif /* !CONFIG_LIBPOSIX_ENVIRON */
@@ -180,7 +180,7 @@ static __constructor void _libelf_init(void) {
 		UK_CRASH("Failed to initialize libelf: Version error");
 }
 
-int main(int argc, char *argv[])
+int main(int argc, const char *argv[])
 {
 #if CONFIG_APPELFLOADER_INITRDEXEC
 	struct ukplat_memregion_desc *img;
@@ -203,6 +203,7 @@ int main(int argc, char *argv[])
 #if CONFIG_APPELFLOADER_VFSEXEC_ENVPWD
 	char *env_pwd;
 #endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPWD */
+	int envc;
 
 	UK_ASSERT(s);
 
@@ -357,8 +358,15 @@ int main(int argc, char *argv[])
 #endif /* !CONFIG_LIBUKRANDOM */
 
 	uk_pr_debug("%s: Prepare application thread...\n", progname);
+	ret = elf_arg_env_count(&argc, argv, &envc, environ,
+				PAGES2BYTES(CONFIG_APPELFLOADER_STACK_NBPAGES));
+	if (unlikely(ret < 0)) {
+		uk_pr_err("Args + env size exceeds limit, increase stack size\n");
+		goto out_free_thread;
+	}
+
 	elf_ctx_init(&app_thread->ctx, prog, progname,
-		     argc, argv, environ, rand);
+		     argc, argv, envc, environ, rand);
 	app_thread->flags |= UK_THREADF_RUNNABLE;
 #if CONFIG_LIBPOSIX_PROCESS
 	uk_posix_process_create(uk_alloc_get_default(),

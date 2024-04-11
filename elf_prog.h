@@ -156,7 +156,28 @@ void elf_unload(struct elf_prog *elf_prog);
  *   release/modify while `ctx` and `prog` are in use.
  */
 void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
-		  const char *argv0, int argc, char *argv[], char *environ[],
+		  const char *argv0, int argc, const char *argv[],
+		  int envc, const char *environ[],
 		  uint64_t rand[2]);
+
+/**
+ * Count the number of args and env vars.
+ *
+ * Besides counting, also validates the total number of ars and env vars against
+ * limits. The policy is:
+ *
+ * The total length of args and env vars can exceed the minimum defined by POSIX
+ * (ARG_MAX) as long as it's not larger than 1/4 of the stack size.
+ *
+ * @param argc[out] Args count. Updated by the function.
+ * @param argv      Args vector
+ * @param envc[out] Environmental variables count. Updated by the function.
+ * @param envp      Environmental variables vector
+ * @param stack_sz  Stack size of the process.
+ * @return          Length on success, -E2BIG if arguments exceed limit.
+ */
+int elf_arg_env_count(int *argc, const char **argv,
+		      int *envc, const char **envp,
+		      __sz stack_sz);
 
 #endif /* ELF_PROG_H */
