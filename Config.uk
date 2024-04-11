@@ -11,6 +11,7 @@ config APPELFLOADER_DEPENDENCIES
 	select LIBPOSIX_TIME
 	imply LIBPOSIX_PROCESS
 	imply LIBPOSIX_PROCESS_PIDS
+	imply LIBPOSIX_PROCESS_EXECVE
 	imply PAGING
 	imply LIBUKVMEM
 	imply LIBPOSIX_MMAP
@@ -21,6 +22,13 @@ config APPELFLOADER_DEPENDENCIES
 	imply LIBPOSIX_USER
 	imply LIBUKRANDOM
 	imply LIBPOSIX_ENVIRON
+
+# We use a separate option for the dependencies of elf_binfmt
+# to avoid duplication of build conditions in the Makefile
+config APPELFLOADER_ELF_BINFMT
+	bool
+	default y
+	depends on LIBVFSCORE && LIBUKBINFMT
 
 ### App configuration
 choice
