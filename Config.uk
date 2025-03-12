@@ -110,20 +110,6 @@ config APPELFLOADER_MULTIPROCESS
 	select LIBUKBOOT_INIT
 endif
 
-menu "System call implementations"
-	config APPELFLOADER_BRK
-	bool "brk, sbrk"
-	default y
-	select LIBUKALLOC
-
-	config APPELFLOADER_BRK_NBPAGES
-	int "Reserved heap size for application (number of pages)"
-	default 512
-	depends on APPELFLOADER_BRK
-	help
-		<n> * 4K; 256 = 1MB, 512 = 2MB, 1024 = 4MB, ...
-endmenu
-
 config APPELFLOADER_STACK_NBPAGES
 	int "Application stack size (number of pages)"
 	default 32
