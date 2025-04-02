@@ -368,11 +368,16 @@ int main(int argc, const char *argv[])
 	elf_ctx_init(&app_thread->ctx, prog, progname,
 		     argc, argv, envc, environ, rand);
 	app_thread->flags |= UK_THREADF_RUNNABLE;
-#if CONFIG_LIBPOSIX_PROCESS
-	uk_posix_process_create(uk_alloc_get_default(),
-				app_thread,
-				uk_thread_current());
-#endif
+
+#if CONFIG_LIBPOSIX_PROCESS_MULTITHREADING
+	/* Add application thread to process */
+	ret = uk_posix_process_create_pthread(app_thread);
+	if (unlikely(ret)) {
+		uk_pr_err("Could not create pthread\n");
+		goto out_free_thread;
+	}
+#endif /* CONFIG_LIBPOSIX_PROCESS_MULTITHREADING */
+
 	uk_pr_debug("%s: Application stack at %p - %p, pointer: %p\n",
 		    progname,
 		    (void *) app_thread->_mem.stack,
