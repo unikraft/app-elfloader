@@ -383,7 +383,7 @@ int main(int argc, const char *argv[])
 		    (void *) ((uintptr_t) app_thread->_mem.stack
 			      + PAGES2BYTES(CONFIG_APPELFLOADER_STACK_NBPAGES)),
 		    (void *) app_thread->ctx.sp);
-	uk_pr_debug("%s: Application entrance at %p\n",
+	uk_pr_debug("%s: Application entry at %p\n",
 		    progname,
 		    (void *) app_thread->ctx.ip);
 

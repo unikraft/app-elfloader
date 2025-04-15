@@ -99,7 +99,7 @@ config APPELFLOADER_VFSEXEC_ENVPWD
 		directory is changed to the given path.
 
 config APPELFLOADER_VFSEXEC_EXECBIT
-	bool "Ensure executable bit"
+	bool "Enforce executable bit"
 	default y
 	help
 		Only execute application if executable bit is set.
