@@ -349,7 +349,11 @@ int main(int argc, const char *argv[])
 	 * Initialize application thread
 	 */
 #if CONFIG_LIBUKRANDOM
-	uk_random_fill_buffer(rand, sizeof(rand));
+	ret = uk_random_fill_buffer(rand, sizeof(rand));
+	if (unlikely(ret)) {
+		uk_pr_err("Could not get random bytes (%d)\n", ret);
+		goto out;
+	}
 #else /* !CONFIG_LIBUKRANDOM */
 	/* Without random numbers, use a hardcoded seed */
 	uk_pr_warn("%s: Using hard-coded random seed\n", progname);

@@ -52,7 +52,11 @@ static int uk_binfmt_load_elf(struct uk_binfmt_loader_args *args)
 	uk_pr_debug("%s: Entry at %p\n", args->progname, (void *)prog->entry);
 
 #if CONFIG_LIBUKRANDOM
-	uk_random_fill_buffer(rand, sizeof(rand));
+	rc = uk_random_fill_buffer(rand, sizeof(rand));
+	if (unlikely(rc)) {
+		uk_pr_err("Could not get random bytes (%d)\n", rc);
+		return rc;
+	}
 #else /* !CONFIG_LIBUKRANDOM */
 	/* Without random numbers, use a hardcoded seed */
 	uk_pr_warn("%s: Using hard-coded random seed\n", args->progname);
