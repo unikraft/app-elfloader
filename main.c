@@ -225,11 +225,18 @@ int main(int argc, const char *argv[])
 	progname_conv = strdup(path);
 	progname      = basename_internal(progname_conv);
 #endif /* CONFIG_APPELFLOADER_VFSEXEC */
+
+#if CONFIG_LIBPOSIX_PROCESS_EXECVE && CONFIG_APPELFLOADER_VFSEXEC
+	/* Cut off kernel name (argv[0]) from argument vector */
+	argv = &argv[1];
+	argc -= 1;
+#else /* !(CONFIG_LIBPOSIX_PROCESS_EXECVE && CONFIG_APPELFLOADER_VFSEXEC) */
 	/* Cut off kernel name (argv[0]) and program name (argv[1])
 	 * from argument vector
 	 */
 	argv = &argv[2];
 	argc -= 2;
+#endif /* !(CONFIG_LIBPOSIX_PROCESS_EXECVE && CONFIG_APPELFLOADER_VFSEXEC) */
 
 #else /* !CONFIG_APPELFLOADER_CUSTOMAPPNAME */
 	/* Ensure argv[0] exists and is set
@@ -246,11 +253,36 @@ int main(int argc, const char *argv[])
 	progname_conv = strdup(path);
 	progname      = basename_internal(progname_conv);
 #endif /* CONFIG_APPELFLOADER_VFSEXEC */
+
 	/* Cut off kernel name (argv[0]) from argument vector */
 	argv = &argv[1];
 	argc -= 1;
 
 #endif /* !CONFIG_APPELFLOADER_CUSTOMAPPNAME */
+
+#if CONFIG_APPELFLOADER_VFSEXEC_ENVPATH
+	env_path = getenv("PATH");
+	if (env_path) {
+		realpath = locate_exec(path, env_path);
+		if (PTR2ERR(realpath) == -EINVAL) {
+			realpath = NULL;
+		} else if (PTRISERR(realpath) && PTR2ERR(realpath) != -EINVAL) {
+			uk_pr_err("%s: Failed to find executable in envirenment ($PATH): %s (%d)",
+				  progname, strerror(-PTR2ERR(realpath)),
+				  PTR2ERR(realpath));
+			goto out;
+		}
+	}
+#endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPATH */
+
+#if CONFIG_LIBPOSIX_PROCESS_EXECVE && CONFIG_APPELFLOADER_VFSEXEC
+	ret = execve(realpath ? realpath : path,
+		     (char * const *)argv, (char * const *)environ);
+	if (unlikely(ret)) {
+		uk_pr_err("Could not execve (%d)\n", ret);
+		goto out;
+	}
+#endif /* CONFIG_LIBPOSIX_PROCESS_EXECVE && CONFIG_APPELFLOADER_VFSEXEC */
 
 #if CONFIG_APPELFLOADER_INITRDEXEC
 	/*
@@ -312,28 +344,11 @@ int main(int argc, const char *argv[])
 	prog = elf_load_img(uk_alloc_get_default(), (void *) img->vbase,
 			    img->len, progname);
 #else /* CONFIG_APPELFLOADER_VFSEXEC */
-#if CONFIG_APPELFLOADER_VFSEXEC_ENVPATH
-	env_path = getenv("PATH");
-	if (env_path) {
-		realpath = locate_exec(path, env_path);
-		if (PTR2ERR(realpath) == -EINVAL) {
-			realpath = NULL;
-		} else if (PTRISERR(realpath) && PTR2ERR(realpath) != -EINVAL) {
-			uk_pr_err("%s: Failed to find executable in envirenment ($PATH): %s (%d)",
-				  progname, strerror(-PTR2ERR(realpath)),
-				  PTR2ERR(realpath));
-			goto out_free_thread;
-		}
-	}
-#endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPATH */
 	uk_pr_debug("%s: Load executable (%s)...\n",
 		    progname, realpath ? realpath : path);
 	prog = elf_load_vfs(uk_alloc_get_default(),
 			    realpath ? realpath : path, progname);
-#if CONFIG_APPELFLOADER_VFSEXEC_ENVPATH
-	if (realpath)
-		free(realpath);
-#endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPATH */
+
 #endif /* CONFIG_APPELFLOADER_VFSEXEC */
 	if (unlikely(PTRISERR(prog) || !prog)) {
 		ret = -errno;
@@ -352,7 +367,7 @@ int main(int argc, const char *argv[])
 	ret = uk_random_fill_buffer(rand, sizeof(rand));
 	if (unlikely(ret)) {
 		uk_pr_err("Could not get random bytes (%d)\n", ret);
-		goto out;
+		goto out_free_thread;
 	}
 #else /* !CONFIG_LIBUKRANDOM */
 	/* Without random numbers, use a hardcoded seed */
@@ -405,12 +420,14 @@ int main(int argc, const char *argv[])
 	for (;;)
 		sleep(10);
 
-	/* TODO: As soon as we are able to return: properly exit/shutdown */
-
 out_free_thread:
 	uk_thread_release(app_thread);
 out:
 #if CONFIG_APPELFLOADER_VFSEXEC
+#if CONFIG_APPELFLOADER_VFSEXEC_ENVPATH
+	if (realpath)
+		free(realpath);
+#endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPATH */
 	if (progname_conv)
 		free(progname_conv);
 #endif /* CONFIG_APPELFLOADER_VFSEXEC */
