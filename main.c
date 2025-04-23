@@ -373,9 +373,13 @@ int main(int argc, const char *argv[])
 		     argc, argv, envc, environ, rand);
 	app_thread->flags |= UK_THREADF_RUNNABLE;
 #if CONFIG_LIBPOSIX_PROCESS
-	uk_posix_process_create(uk_alloc_get_default(),
-				app_thread,
-				uk_thread_current());
+	ret = uk_posix_process_create(uk_alloc_get_default(),
+				      app_thread,
+				      uk_thread_current());
+	if (unlikely(ret)) {
+		uk_pr_err("Could not create application process: %d\n", ret);
+		return ret;
+	}
 #endif
 	uk_pr_debug("%s: Application stack at %p - %p, pointer: %p\n",
 		    progname,
@@ -392,15 +396,16 @@ int main(int argc, const char *argv[])
 	 */
 	uk_sched_thread_add(s, app_thread);
 
+#if CONFIG_LIBPOSIX_PROCESS
 	/*
-	 * FIXME: Instead of an infinite wait, wait for application
-	 *        to exit (this needs thread_wait support with
-	 *        uksched and/or posix-process)
+	 * Wait for application to exit
 	 */
+	ret = uk_posix_process_wait();
+	goto out;
+#else /* !CONFIG_LIBPOSIX_PROCESS */
 	for (;;)
 		sleep(10);
-
-	/* TODO: As soon as we are able to return: properly exit/shutdown */
+#endif /* !CONFIG_LIBPOSIX_PROCESS */
 
 out_free_thread:
 	uk_thread_release(app_thread);
