@@ -210,7 +210,8 @@ out:
 	return rc;
 }
 
-static int gen_etc_hostname(const char *fpath, mode_t fmode)
+static int gen_etc_hostname(const char *fpath __maybe_unused,
+			    mode_t fmode __maybe_unused)
 {
 	int rc = 0;
 #if CONFIG_APPELFLOADER_AUTOGEN_ETCHOSTNAME
