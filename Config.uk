@@ -102,6 +102,12 @@ config APPELFLOADER_VFSEXEC_EXECBIT
 	default y
 	help
 		Only execute application if executable bit is set.
+
+config APPELFLOADER_MULTIPROCESS
+	bool "Multiprocess application"
+	select LIBPOSIX_PROCESS_MULTIPROCESS
+	select LIBPOSIX_PROCESS_SIGNAL
+	select LIBUKBOOT_INIT
 endif
 
 menu "System call implementations"
