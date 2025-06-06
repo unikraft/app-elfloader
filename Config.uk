@@ -28,7 +28,7 @@ config APPELFLOADER_DEPENDENCIES
 config APPELFLOADER_ELF_BINFMT
 	bool
 	default y
-	depends on LIBVFSCORE && LIBUKBINFMT
+	depends on HAVE_VFS && LIBUKBINFMT
 	depends on LIBPOSIX_PROCESS_MULTITHREADING
 
 ### App configuration
@@ -38,7 +38,7 @@ choice
 
 	config APPELFLOADER_VFSEXEC
 		bool "VFS"
-		select LIBVFSCORE
+		depends on HAVE_VFS
 		help
 			Loads an ELF executable from the virtual filesystem.
 			elfloader will automatically side-load a dynamic loader

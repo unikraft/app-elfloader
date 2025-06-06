@@ -90,7 +90,7 @@ struct elf_prog {
 struct elf_prog *elf_load_img(struct uk_alloc *a, void *img_base,
 			      size_t img_len, const char *progname);
 
-#if CONFIG_LIBVFSCORE
+#if CONFIG_HAVE_VFS
 /**
  * Load an ELF program from a file descriptor region. After loading,
  * the file descriptor can be closed.
@@ -113,7 +113,7 @@ struct elf_prog *elf_load_img(struct uk_alloc *a, void *img_base,
  */
 struct elf_prog *elf_load_vfs(struct uk_alloc *a, const char *path,
 			      const char *progname);
-#endif /* CONFIG_LIBVFSCORE */
+#endif /* CONFIG_HAVE_VFS */
 
 /**
  * Release a loaded ELF program

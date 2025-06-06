@@ -48,11 +48,11 @@
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
-#if CONFIG_LIBVFSCORE
+#if CONFIG_HAVE_VFS
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#endif /* CONFIG_LIBVFSCORE */
+#endif /* CONFIG_HAVE_VFS */
 #include <uk/assert.h>
 #include <uk/print.h>
 #include <uk/essentials.h>
@@ -346,7 +346,7 @@ err_out:
 	return ret;
 }
 
-#if CONFIG_LIBVFSCORE
+#if CONFIG_HAVE_VFS
 #if CONFIG_LIBPOSIX_MMAP
 /* If vastart + phdr.p_filesz (vastart) < vastart + phdr.p_memsz (vaend),
  * 0 out that remainder, either through memset or through anonymous mappings
@@ -736,7 +736,7 @@ err_free_img:
 err_out:
 	return ret;
 }
-#endif /* CONFIG_LIBVFSCORE */
+#endif /* CONFIG_HAVE_VFS */
 
 #if CONFIG_LIBUKVMEM
 static int elf_load_ptprotect(struct elf_prog *elf_prog, Elf *elf)
@@ -915,7 +915,7 @@ err_out:
 	return ERR2PTR(ret);
 }
 
-#if CONFIG_LIBVFSCORE
+#if CONFIG_HAVE_VFS
 static struct elf_prog *do_elf_load_vfs(struct uk_alloc *a, const char *path,
 					const char *progname, bool nointerp)
 {
@@ -1055,4 +1055,4 @@ err_unload_prog:
 err_out:
 	return ERR2PTR(err);
 }
-#endif /* CONFIG_LIBVFSCORE */
+#endif /* CONFIG_HAVE_VFS */
