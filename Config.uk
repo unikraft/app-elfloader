@@ -145,7 +145,7 @@ config APPELFLOADER_VDSO
 
 menuconfig APPELFLOADER_AUTOGEN
 	bool "Auto-generate configuration files (HFS)"
-	depends on LIBVFSCORE
+	depends on HAVE_VFS
 	default y
 	help
 		Automatically generate configuration files according to the
