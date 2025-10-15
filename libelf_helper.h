@@ -51,8 +51,8 @@
 		}							\
 	} while(0)
 
-#define elferr_warn(fmtn, ...) elferr_k(KLVL_WARN, fmtn, ##__VA_ARGS__)
-#define elferr_err(fmtn, ...)  elferr_k(KLVL_ERR,  fmtn, ##__VA_ARGS__)
-#define elferr_crit(fmtn, ...) elferr_k(KLVL_CRIT, fmtn, ##__VA_ARGS__)
+#define elferr_warn(fmtn, ...) elferr_k(UK_PRINT_KLVL_WARN, fmtn, ##__VA_ARGS__)
+#define elferr_err(fmtn, ...)  elferr_k(UK_PRINT_KLVL_ERR,  fmtn, ##__VA_ARGS__)
+#define elferr_crit(fmtn, ...) elferr_k(UK_PRINT_KLVL_CRIT, fmtn, ##__VA_ARGS__)
 
 #endif /* LIBELF_HELPER */
