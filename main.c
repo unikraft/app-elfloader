@@ -267,7 +267,7 @@ int main(int argc, const char *argv[])
 		if (PTR2ERR(realpath) == -EINVAL) {
 			realpath = NULL;
 		} else if (PTRISERR(realpath) && PTR2ERR(realpath) != -EINVAL) {
-			uk_pr_err("%s: Failed to find executable in envirenment ($PATH): %s (%d)",
+			uk_pr_err("%s: Failed to find executable in environment ($PATH): %s (%d)",
 				  progname, strerror(-PTR2ERR(realpath)),
 				  PTR2ERR(realpath));
 			goto out;
