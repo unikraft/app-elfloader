@@ -63,6 +63,7 @@
 #include <uk/arch/limits.h>
 #endif /* CONFIG_LIBUKVMEM */
 #include <sys/mman.h>
+#include <uk/paging.h>
 
 #include "libelf_helper.h"
 #include "elf_prog.h"
@@ -229,7 +230,7 @@ static int elf_load_parse(struct elf_prog *elf_prog, Elf *elf)
 
 	elf_prog->phdr.num = ehdr.e_phnum;
 	elf_prog->phdr.entsize = ehdr.e_phentsize;
-	elf_prog->valen = PAGE_ALIGN_UP(elf_prog->upperl);
+	elf_prog->valen = UK_PAGING_PAGE_ALIGN_UP(elf_prog->upperl);
 	return 0;
 
 err_out:
@@ -273,7 +274,7 @@ static int elf_load_imgcpy(struct elf_prog *elf_prog, Elf *elf,
 	GElf_Phdr phdr;
 	int ret;
 
-	UK_ASSERT(elf_prog->align && PAGE_ALIGNED(elf_prog->align));
+	UK_ASSERT(elf_prog->align && UK_PAGING_PAGE_ALIGNED(elf_prog->align));
 
 	if (unlikely(gelf_getehdr(elf, &ehdr) == NULL)) {
 		elferr_err("%s: Failed to get executable header",
@@ -331,7 +332,7 @@ static int elf_load_imgcpy(struct elf_prog *elf_prog, Elf *elf,
 		/* Compute the area that needs to be zeroed */
 		vastart = vaend;
 		vaend   = vastart + (phdr.p_memsz - phdr.p_filesz);
-		vaend   = PAGE_ALIGN_UP(vaend);
+		vaend   = UK_PAGING_PAGE_ALIGN_UP(vaend);
 		uk_pr_debug("%s: Zeroing 0x%"PRIx64" - 0x%"PRIx64"\n",
 			    elf_prog->name,
 			    (uint64_t) (vastart),
@@ -367,28 +368,29 @@ static int elf_load_mmap_filesz_memsz_diff(struct elf_prog *elf_prog,
 		/* From the last byte contained in filesz to the last
 		 * byte contained in memsz, we can either have:
 		 * 1. a page alignment adjustment, where the end
-		 * address is just PAGE_ALIGN_UP(paddr + filesz), which
-		 * means that our initial call to mmap already read in
+		 * address is just UK_PAGING_PAGE_ALIGN_UP(paddr + filesz),
+		 * which means that our initial call to mmap already read in
 		 * a page for us whose remaining bytes we memset without
 		 * generating a page fault, because
-		 * vaend - vastart < PAGE_SIZE
+		 * vaend - vastart < UK_PAGING_PAGE_SIZE
 		 * ...
 		 */
-		memset((void *)vastart, 0, PAGE_ALIGN_UP(vastart) - vastart);
+		memset((void *)vastart, 0,
+		       UK_PAGING_PAGE_ALIGN_UP(vastart) - vastart);
 	}
 
-	if (vaend == PAGE_ALIGN_UP(vastart))
+	if (vaend == UK_PAGING_PAGE_ALIGN_UP(vastart))
 		return 0;
 
 	/*
 	 * ...
-	 * 2. vaend - vastart >= PAGE_SIZE, which can happen if
+	 * 2. vaend - vastart >= UK_PAGING_PAGE_SIZE, which can happen if
 	 * this segment contains a NOBITS section, such as .bss.
 	 * If that is the case, then simply anonymously map this
 	 * remaining area so that we don't waste time memsetting
 	 * it (.bss is quite large).
 	 */
-	vastart = PAGE_ALIGN_UP(vastart);
+	vastart = UK_PAGING_PAGE_ALIGN_UP(vastart);
 	vastart = (uintptr_t)mmap((void *)vastart, vaend - vastart,
 				  get_phdr_mmap_prot(phdr),
 				  MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS,
@@ -470,7 +472,8 @@ static int do_elf_load_fdphdr_0(struct elf_prog *elf_prog,
 
 	/* mmap anonymously what we are left if memsz > filesz */
 	vastart += phdr->p_filesz;
-	vaend = PAGE_ALIGN_UP(vastart + (phdr->p_memsz - phdr->p_filesz));
+	vaend = UK_PAGING_PAGE_ALIGN_UP(vastart + (phdr->p_memsz -
+						   phdr->p_filesz));
 	if (vaend > vastart) {
 		rc = elf_load_mmap_filesz_memsz_diff(elf_prog, phdr,
 						     vastart, vaend);
@@ -504,10 +507,11 @@ static int do_elf_load_fdphdr_not0(struct elf_prog *elf_prog,
 	 * Therefore, taking care of the address misalignment will also take
 	 * care of the file misalignment.
 	 */
-	delta_p_offset = phdr->p_vaddr - PAGE_ALIGN_DOWN(phdr->p_vaddr);
+	delta_p_offset = phdr->p_vaddr -
+			 UK_PAGING_PAGE_ALIGN_DOWN(phdr->p_vaddr);
 
-	addr = (void *)PAGE_ALIGN_DOWN((phdr->p_vaddr +
-				       (uintptr_t)elf_prog->vabase));
+	addr = (void *)UK_PAGING_PAGE_ALIGN_DOWN((phdr->p_vaddr +
+						 (uintptr_t)elf_prog->vabase));
 
 	uk_pr_debug("%s: Memory mapping 0x%"PRIx64" - 0x%"PRIx64" to 0x%"PRIx64" - 0x%"PRIx64"\n",
 		    elf_prog->name,
@@ -531,11 +535,11 @@ static int do_elf_load_fdphdr_not0(struct elf_prog *elf_prog,
 		}
 
 		vastart += phdr->p_filesz + delta_p_offset;
-		vaend = PAGE_ALIGN_UP(vastart +
+		vaend = UK_PAGING_PAGE_ALIGN_UP(vastart +
 				      (phdr->p_memsz - phdr->p_filesz));
 	} else {
 		vastart = (uintptr_t)addr;
-		vaend = PAGE_ALIGN_UP(vastart + phdr->p_memsz +
+		vaend = UK_PAGING_PAGE_ALIGN_UP(vastart + phdr->p_memsz +
 				      delta_p_offset);
 	}
 
@@ -618,7 +622,7 @@ static int elf_load_fdphdr(struct elf_prog *elf_prog, GElf_Phdr *phdr, int fd)
 	/* Compute the area that needs to be zeroed */
 	vastart = vaend;
 	vaend = vastart + (phdr->p_memsz - phdr->p_filesz);
-	vaend = PAGE_ALIGN_UP(vaend);
+	vaend = UK_PAGING_PAGE_ALIGN_UP(vaend);
 	uk_pr_debug("%s: Zeroing 0x%"PRIx64" - 0x%"PRIx64"\n",
 		    elf_prog->name,
 		    (uint64_t)(vastart),
@@ -636,7 +640,7 @@ static int elf_load_fd(struct elf_prog *elf_prog, Elf *elf, int fd)
 	GElf_Phdr phdr;
 	int ret = -1;
 
-	UK_ASSERT(elf_prog->align && PAGE_ALIGNED(elf_prog->align));
+	UK_ASSERT(elf_prog->align && UK_PAGING_PAGE_ALIGNED(elf_prog->align));
 
 	if (unlikely(gelf_getehdr(elf, &ehdr) == NULL)) {
 		elferr_err("%s: Failed to get executable header",
@@ -783,8 +787,8 @@ static int elf_load_ptprotect(struct elf_prog *elf_prog, Elf *elf)
 
 		vastart = phdr.p_vaddr + (uintptr_t)elf_prog->vabase;
 		vaend   = vastart + phdr.p_memsz;
-		vastart = PAGE_ALIGN_DOWN(vastart);
-		vaend   = PAGE_ALIGN_UP(vaend);
+		vastart = UK_PAGING_PAGE_ALIGN_DOWN(vastart);
+		vaend   = UK_PAGING_PAGE_ALIGN_UP(vaend);
 		valen   = vaend - vastart;
 		uk_pr_debug("%s: Protecting 0x%"PRIx64" - 0x%"PRIx64": %c%c%c\n",
 				elf_prog->name,
@@ -795,11 +799,11 @@ static int elf_load_ptprotect(struct elf_prog *elf_prog, Elf *elf)
 				phdr.p_flags & PF_X ? 'X' : '-');
 		ret = uk_vma_set_attr(vas, vastart, valen,
 				((phdr.p_flags & PF_R) ?
-				  PAGE_ATTR_PROT_READ  : 0x0) |
+				  UK_PAGING_PAGE_ATTR_PROT_READ  : 0x0) |
 				((phdr.p_flags & PF_W) ?
-				  PAGE_ATTR_PROT_WRITE : 0x0) |
+				  UK_PAGING_PAGE_ATTR_PROT_WRITE : 0x0) |
 				((phdr.p_flags & PF_X) ?
-				  PAGE_ATTR_PROT_EXEC  : 0x0),
+				  UK_PAGING_PAGE_ATTR_PROT_EXEC  : 0x0),
 				0);
 		if (ret < 0)
 			uk_pr_err("%s: Failed to set protection bits: %d. Program execution may fail or might be unsafe.\n",
@@ -825,13 +829,15 @@ static void elf_unload_ptunprotect(struct elf_prog *elf_prog)
 
 	vastart = (uintptr_t) elf_prog->vabase;
 	vaend   = vastart + (uintptr_t) elf_prog->valen;
-	vastart = PAGE_ALIGN_DOWN(vastart);
-	vaend   = PAGE_ALIGN_UP(vaend);
+	vastart = UK_PAGING_PAGE_ALIGN_DOWN(vastart);
+	vaend   = UK_PAGING_PAGE_ALIGN_UP(vaend);
 	valen   = vaend - vastart;
 	uk_pr_debug("%s: Restore RW- protection: 0x%"PRIx64" - 0x%"PRIx64"\n",
 		    elf_prog->name, (uint64_t) vastart, (uint64_t) vaend);
 	ret = uk_vma_set_attr(vas, vastart, valen,
-			      (PAGE_ATTR_PROT_READ | PAGE_ATTR_PROT_WRITE), 0);
+			      (UK_PAGING_PAGE_ATTR_PROT_READ |
+			       UK_PAGING_PAGE_ATTR_PROT_WRITE),
+			      0);
 	if (unlikely(ret < 0))
 		uk_pr_err("%s: Failed to restore protection bits: %d.\n",
 			  elf_prog->name, ret);
