@@ -267,9 +267,10 @@ int main(int argc, const char *argv[])
 		if (PTR2ERR(realpath) == -EINVAL) {
 			realpath = NULL;
 		} else if (PTRISERR(realpath) && PTR2ERR(realpath) != -EINVAL) {
-			uk_pr_err("%s: Failed to find executable in environment ($PATH): %s (%d)",
+			uk_pr_err("%s: Failed to find executable in environment ($PATH): %s (%d)\n",
 				  progname, strerror(-PTR2ERR(realpath)),
 				  PTR2ERR(realpath));
+			ret = PTR2ERR(realpath);
 			goto out;
 		}
 	}
@@ -425,10 +426,10 @@ out_free_thread:
 out:
 #if CONFIG_APPELFLOADER_VFSEXEC
 #if CONFIG_APPELFLOADER_VFSEXEC_ENVPATH
-	if (realpath)
+	if (realpath && !PTRISERR(realpath))
 		free(realpath);
 #endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPATH */
-	if (progname_conv)
+	if (progname_conv && !PTRISERR(progname_conv))
 		free(progname_conv);
 #endif /* CONFIG_APPELFLOADER_VFSEXEC */
 	return ret;
