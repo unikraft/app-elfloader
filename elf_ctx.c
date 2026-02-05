@@ -48,7 +48,6 @@
 
 #include <limits.h>
 #include <string.h>
-#include <uk/plat/bootstrap.h>
 #include <uk/assert.h>
 #include <uk/print.h>
 #include <uk/essentials.h>
