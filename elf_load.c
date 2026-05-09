@@ -53,6 +53,11 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #endif /* CONFIG_HAVE_VFS */
+#if CONFIG_PLAT_HYPERLIGHT && CONFIG_LIBCPIOVFS
+#include <vfscore/file.h>
+#include <vfscore/vnode.h>
+#include <vfscore/dentry.h>
+#endif
 #include <uk/assert.h>
 #include <uk/print.h>
 #include <uk/essentials.h>
@@ -1047,7 +1052,39 @@ static struct elf_prog *do_elf_load_vfs(struct uk_alloc *a, const char *path,
 	uk_pr_debug("%s: Note, ignoring executable bit state\n", progname);
 #endif /* !CONFIG_APPELFLOADER_VFSEXEC_EXECBIT */
 
+#if CONFIG_PLAT_HYPERLIGHT && CONFIG_LIBCPIOVFS
+	/* On Hyperlight with cpiovfs, the file data is already in memory
+	 * (initrd).  Use a direct pointer via elf_memory() to avoid a
+	 * 100+ MB malloc+read that crashes the buddy allocator.
+	 */
+	{
+		/* Must match the cpiovfs_node layout in lib/cpiovfs/cpiovfs.c */
+		struct cpiovfs_node {
+			char *name;
+			size_t namelen;
+			int type;
+			mode_t mode;
+			uint64_t ino;
+			const char *data;
+			size_t size;
+			struct cpiovfs_node *child;
+			struct cpiovfs_node *next;
+		};
+		struct vfscore_file *fp = vfscore_get_file(fd);
+		struct cpiovfs_node *np;
+		if (!fp || !fp->f_dentry || !fp->f_dentry->d_vnode) {
+			uk_pr_err("%s: Cannot get vnode for %s\n",
+				  progname, path);
+			ret = -ENOENT;
+			goto err_close_fd;
+		}
+		np = (struct cpiovfs_node *)fp->f_dentry->d_vnode->v_data;
+		elf = elf_memory((char *)np->data, np->size);
+		vfscore_put_file(fp);
+	}
+#else
 	elf = elf_open(fd);
+#endif
 	if (unlikely(!elf)) {
 		elferr_err("%s: Failed to initialize ELF parser\n",
 			   progname);
