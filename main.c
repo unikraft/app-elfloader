@@ -601,7 +601,64 @@ int main(int argc, const char *argv[])
 #endif /* !CONFIG_LIBUKRANDOM */
 
 	uk_pr_debug("%s: Prepare application thread...\n", progname);
-	ret = elf_arg_env_count(&argc, argv, &envc, environ,
+
+	const char **eff_environ = environ;
+#if CONFIG_PLAT_HYPERLIGHT
+	/* Stuff two pointer-slot addresses into the loaded ELF's env so a
+	 * dynamically-linked driver that doesn't link against kernel
+	 * symbols can still read the current in-flight FunctionCall bytes:
+	 *   HL_FC_BYTES_PTR=0x<addr of slot holding (const u8 *)>
+	 *   HL_FC_LEN_PTR=0x<addr of slot holding (size_t)>
+	 * Both addresses are kernel .data globals — stable across snapshot
+	 * and restore, so the driver reads them once at init and then just
+	 * dereferences on every dispatch.
+	 */
+	extern const __u8 **hyperlight_dispatch_fc_bytes_slot(void);
+	extern __sz *hyperlight_dispatch_fc_len_slot(void);
+	typedef void (*hl_dispatch_fn)(const __u8 *, __sz);
+	extern hl_dispatch_fn *hyperlight_dispatch_v2_slot(void);
+	static char hl_fc_bytes_env[48];
+	static char hl_fc_len_env[48];
+	static char hl_v2_cb_env[52];
+
+	snprintf(hl_fc_bytes_env, sizeof(hl_fc_bytes_env),
+		 "HL_FC_BYTES_PTR=0x%lx",
+		 (unsigned long)hyperlight_dispatch_fc_bytes_slot());
+	snprintf(hl_fc_len_env, sizeof(hl_fc_len_env),
+		 "HL_FC_LEN_PTR=0x%lx",
+		 (unsigned long)hyperlight_dispatch_fc_len_slot());
+	snprintf(hl_v2_cb_env, sizeof(hl_v2_cb_env),
+		 "HL_V2_CALLBACK_PTR=0x%lx",
+		 (unsigned long)hyperlight_dispatch_v2_slot());
+
+	/* Count existing environ entries and build a merged array. The
+	 * buffer is static to avoid heap churn — elf_ctx_init copies the
+	 * strings into its infoblk so the pointers only need to outlive
+	 * that call.
+	 */
+	int base_envc = 0;
+	if (environ) {
+		while (environ[base_envc])
+			base_envc++;
+	}
+
+	static const char *hl_merged_env[64];
+	const int hl_extra = 3;
+	if (base_envc + hl_extra + 1 <= (int)ARRAY_SIZE(hl_merged_env)) {
+		for (int i = 0; i < base_envc; i++)
+			hl_merged_env[i] = environ[i];
+		hl_merged_env[base_envc]     = hl_fc_bytes_env;
+		hl_merged_env[base_envc + 1] = hl_fc_len_env;
+		hl_merged_env[base_envc + 2] = hl_v2_cb_env;
+		hl_merged_env[base_envc + 3] = NULL;
+		eff_environ = hl_merged_env;
+	} else {
+		uk_pr_warn("%s: skipping HL_FC_*_PTR env injection; "
+			   "too many existing env vars\n", progname);
+	}
+#endif /* CONFIG_PLAT_HYPERLIGHT */
+
+	ret = elf_arg_env_count(&argc, argv, &envc, eff_environ,
 				PAGES2BYTES(CONFIG_APPELFLOADER_STACK_NBPAGES));
 	if (unlikely(ret < 0)) {
 		uk_pr_err("Args + env size exceeds limit, increase stack size\n");
@@ -609,7 +666,7 @@ int main(int argc, const char *argv[])
 	}
 
 	elf_ctx_init(&app_thread->ctx, prog, progname,
-		     argc, argv, envc, environ, rand);
+		     argc, argv, envc, eff_environ, rand);
 #if !CONFIG_PLAT_HYPERLIGHT
 	/* Mark the thread as runnable for the scheduler.
 	 * On Hyperlight, the dispatch callback runs the thread directly
