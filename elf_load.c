@@ -744,6 +744,80 @@ static int elf_load_fd(struct elf_prog *elf_prog, Elf *elf, int fd)
 			return ret;
 	}
 
+#if !CONFIG_LIBPOSIX_MMAP
+	/*
+	 * Without POSIX mmap, the binary is loaded at vabase + p_vaddr,
+	 * not at p_vaddr directly.  For PIE (ET_DYN) binaries, internal
+	 * pointers need to be adjusted by the load delta.  Walk the RELA
+	 * section and apply R_X86_64_RELATIVE relocations.
+	 */
+	if (ehdr.e_type == ET_DYN) {
+		uintptr_t delta = (uintptr_t)elf_prog->vabase;
+
+		for (phi = 0; phi < phnum; ++phi) {
+			if (gelf_getphdr(elf, phi, &phdr) != &phdr)
+				continue;
+			if (phdr.p_type != PT_LOAD)
+				continue;
+			/* Find the RELA section within this LOAD segment */
+			Elf_Scn *scn = NULL;
+			while ((scn = elf_nextscn(elf, scn)) != NULL) {
+				GElf_Shdr shdr;
+				if (gelf_getshdr(scn, &shdr) != &shdr)
+					continue;
+				if (shdr.sh_type != SHT_RELA)
+					continue;
+				Elf_Data *rdata = elf_getdata(scn, NULL);
+				if (!rdata)
+					continue;
+				size_t nrel = shdr.sh_size / shdr.sh_entsize;
+				/* Pass 1: apply R_X86_64_RELATIVE */
+				for (size_t ri = 0; ri < nrel; ri++) {
+					GElf_Rela rela;
+					if (gelf_getrela(rdata, ri, &rela)
+					    != &rela)
+						continue;
+					if (GELF_R_TYPE(rela.r_info)
+					    != R_X86_64_RELATIVE)
+						continue;
+					uintptr_t *target =
+						(uintptr_t *)(delta
+							       + rela.r_offset);
+					*target = delta + rela.r_addend;
+				}
+				/* Pass 2: resolve R_X86_64_IRELATIVE
+				 * (resolvers may use RELATIVE-patched
+				 * GOT entries, so must run after pass 1)
+				 */
+				for (size_t ri = 0; ri < nrel; ri++) {
+					GElf_Rela rela;
+					if (gelf_getrela(rdata, ri, &rela)
+					    != &rela)
+						continue;
+					if (GELF_R_TYPE(rela.r_info)
+					    != R_X86_64_IRELATIVE)
+						continue;
+					typedef uintptr_t
+						(*ifunc_t)(void);
+					ifunc_t resolver =
+						(ifunc_t)(delta
+						+ rela.r_addend);
+					uintptr_t *target =
+						(uintptr_t *)(delta
+							       + rela.r_offset);
+					*target = resolver();
+				}
+				/* Only one RELA section expected */
+				break;
+			}
+			/* Only process once (not per LOAD) */
+			break;
+		}
+		uk_pr_info("%s: Applied PIE relocations (delta=0x%"PRIx64")\n",
+			   elf_prog->name, (uint64_t)delta);
+	}
+#endif /* !CONFIG_LIBPOSIX_MMAP */
+
 	return 0;
 
 err_free_img:
