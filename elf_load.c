@@ -68,6 +68,19 @@
 #include "libelf_helper.h"
 #include "elf_prog.h"
 
+/* Fallback page alignment macros when paging is not configured.
+ * These provide basic 4KB page alignment needed for ELF loading.
+ */
+#ifndef PAGE_ALIGN_UP
+#define __PAGE_SIZE 4096UL
+#define PAGE_ALIGN_UP(addr) (((addr) + __PAGE_SIZE - 1) & ~(__PAGE_SIZE - 1))
+#endif
+
+#ifndef PAGE_ALIGNED
+#define __PAGE_SIZE_MASK (__PAGE_SIZE - 1)
+#define PAGE_ALIGNED(addr) (!((addr) & __PAGE_SIZE_MASK))
+#endif
+
 static int get_phdr_mmap_prot(GElf_Phdr *phdr)
 {
 	int mmap_prot = 0;
