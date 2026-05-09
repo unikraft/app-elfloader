@@ -83,6 +83,7 @@
 #define AT_EXECFN		31
 #define AT_SYSINFO_EHDR		33
 #define AT_SYSINFO		32
+#define AT_MINSIGSTKSZ		51
 
 struct auxv_entry {
 	long key;
@@ -237,6 +238,7 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		 */
 		{ AT_SYSINFO_EHDR, (uintptr_t)vdso_image_addr },
 #endif /* CONFIG_APPELFLOADER_VDSO */
+		{ AT_MINSIGSTKSZ, 2048 },
 		{ AT_IGNORE, 0x0 }
 	};
 	struct auxv_entry auxv_null = { AT_NULL, 0x0 };
