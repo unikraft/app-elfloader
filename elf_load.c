@@ -73,18 +73,6 @@
 #include "libelf_helper.h"
 #include "elf_prog.h"
 
-/* Fallback page alignment macros when paging is not configured.
- * These provide basic 4KB page alignment needed for ELF loading.
- */
-#ifndef PAGE_ALIGN_UP
-#define __PAGE_SIZE 4096UL
-#define PAGE_ALIGN_UP(addr) (((addr) + __PAGE_SIZE - 1) & ~(__PAGE_SIZE - 1))
-#endif
-
-#ifndef PAGE_ALIGNED
-#define __PAGE_SIZE_MASK (__PAGE_SIZE - 1)
-#define PAGE_ALIGNED(addr) (!((addr) & __PAGE_SIZE_MASK))
-#endif
 
 static int get_phdr_mmap_prot(GElf_Phdr *phdr)
 {
@@ -1058,28 +1046,27 @@ static struct elf_prog *do_elf_load_vfs(struct uk_alloc *a, const char *path,
 	 * 100+ MB malloc+read that crashes the buddy allocator.
 	 */
 	{
-		/* Must match the cpiovfs_node layout in lib/cpiovfs/cpiovfs.c */
-		struct cpiovfs_node {
-			char *name;
-			size_t namelen;
-			int type;
-			mode_t mode;
-			uint64_t ino;
-			const char *data;
-			size_t size;
-			struct cpiovfs_node *child;
-			struct cpiovfs_node *next;
-		};
+		extern int cpiovfs_vnode_data(struct vnode *vp,
+					     const char **data, size_t *size);
 		struct vfscore_file *fp = vfscore_get_file(fd);
-		struct cpiovfs_node *np;
+		const char *cpio_data;
+		size_t cpio_size;
+
 		if (!fp || !fp->f_dentry || !fp->f_dentry->d_vnode) {
 			uk_pr_err("%s: Cannot get vnode for %s\n",
 				  progname, path);
 			ret = -ENOENT;
 			goto err_close_fd;
 		}
-		np = (struct cpiovfs_node *)fp->f_dentry->d_vnode->v_data;
-		elf = elf_memory((char *)np->data, np->size);
+		ret = cpiovfs_vnode_data(fp->f_dentry->d_vnode,
+					&cpio_data, &cpio_size);
+		if (ret) {
+			uk_pr_err("%s: Cannot get cpiovfs data for %s\n",
+				  progname, path);
+			vfscore_put_file(fp);
+			goto err_close_fd;
+		}
+		elf = elf_memory((char *)cpio_data, cpio_size);
 		vfscore_put_file(fp);
 	}
 #else
