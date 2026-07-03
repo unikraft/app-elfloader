@@ -34,6 +34,7 @@
 
 #include <uk/config.h>
 #include <libelf.h>
+#include <gelf.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -61,6 +62,121 @@
 #endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPATH */
 
 #include "elf_prog.h"
+
+#if CONFIG_PLAT_HYPERLIGHT
+/*
+ * Hyperlight promotes fork() to vfork (CLONE_VM | CLONE_VFORK) because
+ * there is no MMU-backed address-space duplication.  musl's fork()
+ * wrapper calls _Fork() (which modifies libc globals in the child path)
+ * and __fork_handler() (which runs CPython's pthread_atfork child
+ * handlers).  Under CLONE_VM both sets of modifications are visible to
+ * the parent, corrupting its heap and causing a crash.
+ *
+ * Fix: after loading the interpreter (musl), overwrite fork() with a
+ * raw  clone(SIGCHLD, 0)  syscall + ret.  This skips all of musl's
+ * post-fork bookkeeping — safe because (a) Unikraft is single-threaded,
+ * so no locks can be held during fork, and (b) the child only ever
+ * calls execve() or _exit() before the parent resumes.
+ */
+static void patch_musl_fork(struct elf_prog *prog)
+{
+	struct elf_prog *interp;
+	GElf_Ehdr *ehdr;
+	GElf_Phdr *phdrs;
+	GElf_Dyn  *dyn = NULL;
+	GElf_Sym  *symtab = NULL;
+	const char *strtab = NULL;
+	uint32_t   *hash = NULL;
+	uint32_t    nsyms;
+	int         i;
+	uintptr_t   base;
+
+	if (!prog || !prog->interp.prog || !prog->interp.prog->vabase)
+		return;
+	interp = prog->interp.prog;
+	base   = (uintptr_t)interp->vabase;
+	ehdr   = (GElf_Ehdr *)base;
+
+	if (ehdr->e_ident[EI_MAG0] != ELFMAG0 ||
+	    ehdr->e_ident[EI_MAG1] != ELFMAG1 ||
+	    ehdr->e_ident[EI_MAG2] != ELFMAG2 ||
+	    ehdr->e_ident[EI_MAG3] != ELFMAG3)
+		return;
+
+	phdrs = (GElf_Phdr *)(base + ehdr->e_phoff);
+
+	for (i = 0; i < ehdr->e_phnum; i++) {
+		if (phdrs[i].p_type == PT_DYNAMIC) {
+			dyn = (GElf_Dyn *)(base + phdrs[i].p_vaddr);
+			break;
+		}
+	}
+	if (!dyn)
+		return;
+
+	for (i = 0; dyn[i].d_tag != DT_NULL; i++) {
+		switch (dyn[i].d_tag) {
+		case DT_SYMTAB:
+			symtab = (GElf_Sym *)(base + dyn[i].d_un.d_ptr);
+			break;
+		case DT_STRTAB:
+			strtab = (const char *)(base + dyn[i].d_un.d_ptr);
+			break;
+		case DT_HASH:
+			hash = (uint32_t *)(base + dyn[i].d_un.d_ptr);
+			break;
+		}
+	}
+	if (!symtab || !strtab)
+		return;
+
+	nsyms = hash ? hash[1] : 4096;
+
+	for (i = 0; (uint32_t)i < nsyms; i++) {
+		const char *name;
+		uintptr_t   addr;
+
+		if (symtab[i].st_name == 0)
+			continue;
+		if (GELF_ST_TYPE(symtab[i].st_info) != STT_FUNC)
+			continue;
+		if (symtab[i].st_size == 0)
+			continue;
+		name = &strtab[symtab[i].st_name];
+		if (strcmp(name, "fork") != 0)
+			continue;
+
+		addr = base + symtab[i].st_value;
+
+		/*  mov eax, 56 (SYS_clone)  5 B
+		 *  mov edi, 17 (SIGCHLD)    5 B
+		 *  xor esi, esi             2 B
+		 *  syscall                  2 B
+		 *  ret                      1 B  = 15 B total
+		 */
+		static const unsigned char patch[] = {
+			0xb8, 0x38, 0x00, 0x00, 0x00,
+			0xbf, 0x11, 0x00, 0x00, 0x00,
+			0x31, 0xf6,
+			0x0f, 0x05,
+			0xc3,
+		};
+
+		if (symtab[i].st_size < sizeof(patch)) {
+			uk_pr_warn("patch_musl_fork: fork() too small "
+				   "(%lu B)\n",
+				   (unsigned long)symtab[i].st_size);
+			return;
+		}
+
+		memcpy((void *)addr, patch, sizeof(patch));
+		uk_pr_info("patch_musl_fork: patched fork() at %p\n",
+			   (void *)addr);
+		return;
+	}
+	uk_pr_debug("patch_musl_fork: fork symbol not found\n");
+}
+#endif /* CONFIG_PLAT_HYPERLIGHT */
 
 #if CONFIG_LIBPOSIX_ENVIRON
 extern const char **environ;
@@ -176,9 +292,6 @@ err_out:
 }
 #endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPATH */
 
-/*
- * Init libelf
- */
 static __constructor void _libelf_init(void) {
 	if (elf_version(EV_CURRENT) == EV_NONE)
 		UK_CRASH("Failed to initialize libelf: Version error");
@@ -192,8 +305,8 @@ extern __u64 hyperlight_dispatch_get_elf_entry(void);
 
 
 static struct uk_thread *hyperlight_deferred_thread;
-static struct uk_sched *hyperlight_deferred_sched;
 extern __uptr hyperlight_kernel_fsbase; /* defined in arch/x86/sysctx.c */
+extern __u64 hyperlight_user_stack_top; /* defined in posix-process/process.c */
 static __uptr hyperlight_elf_main_addr; /* main() in loaded ELF (0 = use _start) */
 static __uptr hyperlight_elf_libc_addr; /* musl __libc struct in loaded ELF */
 
@@ -215,7 +328,6 @@ static void find_elf_symbols(const char *path,
 	if (fd < 0)
 		return;
 
-	/* Read ELF header (64 bytes for Elf64) */
 	n = read(fd, ehdr, 64);
 	if (n < 64)
 		goto out;
@@ -227,7 +339,6 @@ static void find_elf_symbols(const char *path,
 	if (!e_shoff || !e_shnum || e_shentsize < 64)
 		goto out;
 
-	/* Iterate section headers to find SHT_SYMTAB */
 	__u64 symtab_off = 0, symtab_sz = 0, symtab_entsz = 0;
 	__u64 strtab_off = 0, strtab_sz = 0;
 	__u32 symtab_link = 0;
@@ -254,7 +365,6 @@ static void find_elf_symbols(const char *path,
 	if (!symtab_off || !symtab_entsz)
 		goto out;
 
-	/* Read the linked .strtab section header */
 	{
 		__u8 shdr[64];
 
@@ -270,7 +380,6 @@ static void find_elf_symbols(const char *path,
 	if (!strtab_off || !strtab_sz)
 		goto out;
 
-	/* Read .strtab into a buffer */
 	char *strtab = malloc(strtab_sz);
 	if (!strtab)
 		goto out;
@@ -284,10 +393,9 @@ static void find_elf_symbols(const char *path,
 		goto out;
 	}
 
-	/* Iterate .symtab entries to find "main" and "__libc" */
 	__u64 num_syms = symtab_sz / symtab_entsz;
 	for (__u64 i = 0; i < num_syms; i++) {
-		__u8 sym[24]; /* Elf64_Sym is 24 bytes */
+		__u8 sym[24];
 
 		if (lseek(fd, symtab_off + i * symtab_entsz, SEEK_SET) < 0)
 			break;
@@ -308,13 +416,11 @@ static void find_elf_symbols(const char *path,
 
 		const char *name = strtab + st_name;
 
-		/* main: GLOBAL FUNC */
 		if (st_type == 2 && !*main_out &&
 		    name[0] == 'm' && name[1] == 'a' &&
 		    name[2] == 'i' && name[3] == 'n' && name[4] == '\0') {
 			*main_out = st_value;
 		}
-		/* __libc: GLOBAL OBJECT */
 		if (st_type == 1 && !*libc_out &&
 		    name[0] == '_' && name[1] == '_' &&
 		    name[2] == 'l' && name[3] == 'i' &&
@@ -361,11 +467,16 @@ static void hyperlight_deferred_run(void)
 		char **argv = (char **)(sp + sizeof(long));
 		char **envp = argv + argc + 1;
 
-		/* Set musl libc.auxv so malloc/stdio work without __init_libc */
+		/* Set musl's __libc.auxv so malloc/stdio work without
+		 * __init_libc.  Offset 8 = offsetof(struct __libc, auxv)
+		 * in musl 1.2.x (src/internal/libc.h).  If musl reorders
+		 * the struct this will silently break — verify after any
+		 * musl version bump.
+		 */
 		if (hyperlight_elf_libc_addr) {
 			char **p = envp;
 			while (*p) p++;
-			p++; /* skip NULL terminator */
+			p++; /* skip NULL terminator → auxv */
 			*((__u64 *)(hyperlight_elf_libc_addr + 8)) = (__u64)p;
 		}
 
@@ -583,6 +694,9 @@ int main(int argc, const char *argv[])
 		   (uint64_t) prog->vabase,
 		   (uint64_t) prog->vabase + prog->valen,
 		   prog->valen, (void *) prog->entry);
+#if CONFIG_PLAT_HYPERLIGHT
+	patch_musl_fork(prog);
+#endif
 
 	/*
 	 * Initialize application thread
@@ -692,6 +806,10 @@ int main(int argc, const char *argv[])
 		    (void *) ((uintptr_t) app_thread->_mem.stack
 			      + PAGES2BYTES(CONFIG_APPELFLOADER_STACK_NBPAGES)),
 		    (void *) app_thread->ctx.sp);
+#if CONFIG_PLAT_HYPERLIGHT
+	hyperlight_user_stack_top = (uintptr_t) app_thread->_mem.stack
+		+ PAGES2BYTES(CONFIG_APPELFLOADER_STACK_NBPAGES);
+#endif
 	uk_pr_debug("%s: Application entry at %p\n",
 		    progname,
 		    (void *) app_thread->ctx.ip);
@@ -707,7 +825,6 @@ int main(int argc, const char *argv[])
 	 * the host with the dispatch function address in RAX.
 	 */
 	hyperlight_deferred_thread = app_thread;
-	hyperlight_deferred_sched = s;
 	/* Store the ELF entry address for use after restore.
 	 * For dynamically-linked binaries, use the interpreter's entry —
 	 * the dynamic linker must run before the main binary's _start.
