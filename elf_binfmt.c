@@ -22,18 +22,25 @@ static int uk_binfmt_load_elf(struct uk_binfmt_loader_args *args)
 	struct elf_prog *prog;
 	__u64 rand[2];
 	int rc;
+	/* elf_load_vfs can corrupt the caller's stack frame (observed
+	 * on Hyperlight auxstack); snapshot args before loading and
+	 * restore after so argv/envp/stack_size survive.
+	 */
+	struct uk_binfmt_loader_args saved;
 
 	UK_ASSERT(args);
 	UK_ASSERT(args->alloc);
 
-	/* TODO Make elf_load_vfs() modular so that we can check the file
-	 * type before we do the actual load. That will also allow us to
-	 * check the parameters before we load the file, as atm we're forced
-	 * to do an elf_unload() on bad parameters.
-	 */
+	saved = *args;
+
 	prog = elf_load_vfs(args->alloc, args->pathname, args->progname);
-	if (unlikely(PTRISERR(prog))) {
+
+	*args = saved;
+
+	if (unlikely(PTRISERR(prog) || !prog)) {
 		rc = PTR2ERR(prog);
+		if (!rc)
+			rc = -ENOENT;
 		if (rc == -ENOEXEC) {
 			uk_pr_warn("%s not handled by ELF binfmt loader\n",
 				   args->pathname);
