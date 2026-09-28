@@ -51,6 +51,11 @@
 #include <uk/assert.h>
 #include <uk/print.h>
 #include <uk/essentials.h>
+#if CONFIG_ARCH_ARM_64
+#include <bits/hwcap.h>
+#include <uk/arch/arm64.h>
+#include <uk/arch/util.h>
+#endif /* CONFIG_ARCH_ARM_64 */
 
 #include "elf_prog.h"
 
@@ -100,6 +105,99 @@ extern char *vdso_image_addr;
 #else
 #error "Unsupported architecture"
 #endif
+
+#if CONFIG_ARCH_ARM_64
+#define ID_FIELD(val, reg, field)					\
+	(((val) >> UK_ARCH_ARM64_##reg##_##field##_SHIFT) &		\
+	 UK_ARCH_ARM64_##reg##_##field##_MASK)
+
+/* Signed 4-bit field: 0xf reads as -1 ("not implemented") */
+#define ID_SFIELD(val, reg, field)					\
+	((int)((__s64)((val) <<						\
+	 (60 - UK_ARCH_ARM64_##reg##_##field##_SHIFT)) >> 60))
+
+/*
+ * AT_HWCAP as Linux reports it on arm64 (uapi/asm/hwcap.h), from the ID
+ * registers: userspace learns the CPU's features from it, and some
+ * programs refuse to run without it (.NET needs ASIMD).  Left out are
+ * features whose state the kernel would have to manage for the program
+ * (SVE, pointer authentication keys, the timer event stream) and CPUID:
+ * at EL1 the ID registers read unfiltered, so they would advertise
+ * features Unikraft leaves disabled (SME, say).  FP and Advanced SIMD
+ * instructions, the crypto ones included, need CONFIG_FPSIMD.
+ */
+static __u64 elf_arm64_hwcap(void)
+{
+	__u64 pfr0 = UK_ARCH_ARM64_SYSREG_READ64(id_aa64pfr0_el1);
+	__u64 pfr1 = UK_ARCH_ARM64_SYSREG_READ64(id_aa64pfr1_el1);
+	__u64 isar0 = UK_ARCH_ARM64_SYSREG_READ64(id_aa64isar0_el1);
+	__u64 isar1 = UK_ARCH_ARM64_SYSREG_READ64(id_aa64isar1_el1);
+	__u64 mmfr2 =
+		UK_ARCH_ARM64_SYSREG_READ64(UK_ARCH_ARM64_ID_AA64MMFR2_EL1);
+	__u64 hwcap = 0;
+
+#if CONFIG_FPSIMD
+	if (ID_SFIELD(pfr0, ID_AA64PFR0_EL1, FP) >= 0)
+		hwcap |= HWCAP_FP;
+	if (ID_SFIELD(pfr0, ID_AA64PFR0_EL1, FP) >= 1)
+		hwcap |= HWCAP_FPHP;
+	if (ID_SFIELD(pfr0, ID_AA64PFR0_EL1, ADVSIMD) >= 0)
+		hwcap |= HWCAP_ASIMD;
+	if (ID_SFIELD(pfr0, ID_AA64PFR0_EL1, ADVSIMD) >= 1)
+		hwcap |= HWCAP_ASIMDHP;
+	if (ID_FIELD(isar0, ID_AA64ISAR0_EL1, AES) >= 1)
+		hwcap |= HWCAP_AES;
+	if (ID_FIELD(isar0, ID_AA64ISAR0_EL1, AES) >= 2)
+		hwcap |= HWCAP_PMULL;
+	if (ID_FIELD(isar0, ID_AA64ISAR0_EL1, SHA1) >= 1)
+		hwcap |= HWCAP_SHA1;
+	if (ID_FIELD(isar0, ID_AA64ISAR0_EL1, SHA2) >= 1)
+		hwcap |= HWCAP_SHA2;
+	if (ID_FIELD(isar0, ID_AA64ISAR0_EL1, SHA2) >= 2)
+		hwcap |= HWCAP_SHA512;
+	if (ID_FIELD(isar0, ID_AA64ISAR0_EL1, RDM) >= 1)
+		hwcap |= HWCAP_ASIMDRDM;
+	if (ID_FIELD(isar0, ID_AA64ISAR0_EL1, SHA3) >= 1)
+		hwcap |= HWCAP_SHA3;
+	if (ID_FIELD(isar0, ID_AA64ISAR0_EL1, SM3) >= 1)
+		hwcap |= HWCAP_SM3;
+	if (ID_FIELD(isar0, ID_AA64ISAR0_EL1, SM4) >= 1)
+		hwcap |= HWCAP_SM4;
+	if (ID_FIELD(isar0, ID_AA64ISAR0_EL1, DP) >= 1)
+		hwcap |= HWCAP_ASIMDDP;
+	if (ID_FIELD(isar0, ID_AA64ISAR0_EL1, FHM) >= 1)
+		hwcap |= HWCAP_ASIMDFHM;
+	if (ID_FIELD(isar1, ID_AA64ISAR1_EL1, JSCVT) >= 1)
+		hwcap |= HWCAP_JSCVT;
+	if (ID_FIELD(isar1, ID_AA64ISAR1_EL1, FCMA) >= 1)
+		hwcap |= HWCAP_FCMA;
+#endif /* CONFIG_FPSIMD */
+	if (ID_FIELD(pfr0, ID_AA64PFR0_EL1, DIT) >= 1)
+		hwcap |= HWCAP_DIT;
+	if (ID_FIELD(isar0, ID_AA64ISAR0_EL1, CRC32) >= 1)
+		hwcap |= HWCAP_CRC32;
+	if (ID_FIELD(isar0, ID_AA64ISAR0_EL1, ATOMIC) >= 2)
+		hwcap |= HWCAP_ATOMICS;
+	if (ID_FIELD(isar0, ID_AA64ISAR0_EL1, TS) >= 1)
+		hwcap |= HWCAP_FLAGM;
+	if (ID_FIELD(isar1, ID_AA64ISAR1_EL1, DPB) >= 1)
+		hwcap |= HWCAP_DCPOP;
+	if (ID_FIELD(isar1, ID_AA64ISAR1_EL1, LRCPC) >= 1)
+		hwcap |= HWCAP_LRCPC;
+	if (ID_FIELD(isar1, ID_AA64ISAR1_EL1, LRCPC) >= 2)
+		hwcap |= HWCAP_ILRCPC;
+	if (ID_FIELD(isar1, ID_AA64ISAR1_EL1, SB) >= 1)
+		hwcap |= HWCAP_SB;
+	if (ID_FIELD(mmfr2, ID_AA64MMFR2_EL1, AT) >= 1)
+		hwcap |= HWCAP_USCAT;
+	if (ID_FIELD(pfr1, ID_AA64PFR1_EL1, SSBS) >= 2)
+		hwcap |= HWCAP_SSBS;
+	return hwcap;
+}
+#define UK_AUXV_HWCAP		elf_arm64_hwcap()
+#else /* !CONFIG_ARCH_ARM_64 */
+#define UK_AUXV_HWCAP		0x0
+#endif /* !CONFIG_ARCH_ARM_64 */
 
 static void infoblk_push(struct ukarch_ctx *ctx, void *buf, __sz len)
 {
@@ -221,7 +319,7 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		{ AT_ENTRY, prog->entry },
 		{ AT_FLAGS, 0x0 },
 		{ AT_CLKTCK, 0x64 }, /* Mimic Linux */
-		{ AT_HWCAP, 0x0 },
+		{ AT_HWCAP, UK_AUXV_HWCAP },
 		{ AT_PAGESZ, 4096 },
 		/* base addr of interpreter */
 		{ AT_BASE, prog->interp.prog ?
