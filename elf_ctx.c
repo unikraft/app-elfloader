@@ -199,12 +199,13 @@ static __u64 elf_arm64_hwcap(void)
 #define UK_AUXV_HWCAP		0x0
 #endif /* !CONFIG_ARCH_ARM_64 */
 
+/* `len` may be 0: an empty argument or environment string, which
+ * execve() allows, is pushed as its NUL alone. */
 static void infoblk_push(struct ukarch_ctx *ctx, void *buf, __sz len)
 {
 	UK_ASSERT(ctx);
 	UK_ASSERT(ctx->sp);
 	UK_ASSERT(buf);
-	UK_ASSERT(len);
 
 	ctx->sp -= len + 1;
 	memcpy((void *)ctx->sp, buf, len);
