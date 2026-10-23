@@ -294,6 +294,15 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 			    (uint64_t) prog->interp.prog->entry);
 	}
 
+	/* AT_RANDOM points at 16 bytes the program may read at any time
+	 * (Go's runtime seeds from them) and may overwrite.  `rand` lives in
+	 * the caller's frame, which is stale by the time an execve()d program
+	 * runs, so copy the bytes to the program's stack, as Linux does.
+	 */
+	ctx->sp -= sizeof(uint64_t) * 2;
+	memcpy((void *)ctx->sp, rand, sizeof(uint64_t) * 2);
+	rand = (uint64_t *)ctx->sp;
+
 	/* list of all auxiliary vector entries whose pointer values need
 	 * to point to information block areas
 	 */

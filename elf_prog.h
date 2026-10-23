@@ -151,9 +151,9 @@ void elf_unload(struct elf_prog *elf_prog);
  *   application. The actual c-strings should not be released/modified while
  *   `ctx` and `prog` are in use.
  * @param rand:
- *   Random seed that is passed to the application
- *   Only a reference to rand[] is handed over to the application. Do not
- *   release/modify while `ctx` and `prog` are in use.
+ *   Random seed that is passed to the application (AT_RANDOM)
+ *   The bytes are copied to the application's stack, so rand[] may be
+ *   released once this returns.
  */
 void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		  const char *argv0, int argc, const char *argv[],
