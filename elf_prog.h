@@ -125,6 +125,13 @@ struct elf_prog *elf_load_vfs(struct uk_alloc *a, const char *path,
 void elf_unload(struct elf_prog *elf_prog);
 
 /**
+ * Free the record of a loaded ELF program, and its interpreter's, but leave
+ * their images mapped: for images that something else unmaps (a process's
+ * mappings are released with it), once elf_ctx_init() is done with it.
+ */
+void elf_prog_free(struct elf_prog *elf_prog);
+
+/**
  * Initializes an ukarch_ctx with a loaded ELF program. This program
  * will be executed as soon as the context is scheduled/loaded to
  * the CPU. The function will populate the associated stack with
