@@ -17,6 +17,19 @@
 
 #include "elf_prog.h"
 
+/* Free a program the load cannot go on with: with multiprocess and mmap its
+ * images are the process's, which the failed exec unmaps, so only the
+ * record goes
+ */
+static void elf_binfmt_drop(struct elf_prog *prog)
+{
+#if CONFIG_LIBPOSIX_PROCESS_MULTIPROCESS && CONFIG_LIBPOSIX_MMAP
+	elf_prog_free(prog);
+#else /* !(CONFIG_LIBPOSIX_PROCESS_MULTIPROCESS && CONFIG_LIBPOSIX_MMAP) */
+	elf_unload(prog);
+#endif /* !(CONFIG_LIBPOSIX_PROCESS_MULTIPROCESS && CONFIG_LIBPOSIX_MMAP) */
+}
+
 static int uk_binfmt_load_elf(struct uk_binfmt_loader_args *args)
 {
 	struct elf_prog *prog;
@@ -55,6 +68,8 @@ static int uk_binfmt_load_elf(struct uk_binfmt_loader_args *args)
 	rc = uk_random_fill_buffer(rand, sizeof(rand));
 	if (unlikely(rc)) {
 		uk_pr_err("Could not get random bytes (%d)\n", rc);
+		elf_binfmt_drop(prog);
+		args->user = NULL;
 		return rc;
 	}
 #else /* !CONFIG_LIBUKRANDOM */
@@ -69,7 +84,8 @@ static int uk_binfmt_load_elf(struct uk_binfmt_loader_args *args)
 			       args->stack_size);
 	if (unlikely(rc < 0)) {
 		uk_pr_err("Could not load ELF (%d)\n", rc);
-		elf_unload(prog);
+		elf_binfmt_drop(prog);
+		args->user = NULL;
 		return rc;
 	}
 
@@ -77,13 +93,25 @@ static int uk_binfmt_load_elf(struct uk_binfmt_loader_args *args)
 		     args->argc - 1, &args->argv[1],
 		     args->envc, args->envp, rand);
 
+#if CONFIG_LIBPOSIX_PROCESS_MULTIPROCESS && CONFIG_LIBPOSIX_MMAP
+	/* The images are the process's: unmapped with its other mappings
+	 * when it ends, or when this exec fails. Nothing else needs the
+	 * record past here, and nothing else would free it.
+	 */
+	elf_binfmt_drop(prog);
+	args->user = NULL;
+#endif /* CONFIG_LIBPOSIX_PROCESS_MULTIPROCESS && CONFIG_LIBPOSIX_MMAP */
+
 	return UK_BINFMT_HANDLED;
 }
 
 static int uk_binfmt_unload_elf(struct uk_binfmt_loader_args *args)
 {
 	UK_ASSERT(args);
-	UK_ASSERT(args->user);
+
+	/* Freed already (see uk_binfmt_load_elf()) */
+	if (!args->user)
+		return UK_BINFMT_HANDLED;
 
 	elf_unload((struct elf_prog *)args->user);
 
