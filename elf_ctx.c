@@ -309,6 +309,10 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 	 */
 	struct auxv_entry infoblk_auxv[] = {
 		{ AT_PLATFORM, (__uptr)UK_AUXV_PLATFORM	},
+		/* path to executable: the caller's string, which execve()
+		 * unmaps with the image it replaces
+		 */
+		{ AT_EXECFN, (__uptr)(prog->path ? prog->path : prog->name) },
 	};
 
 	/* list of all auxiliary vector entries whose pointer values need
@@ -319,8 +323,6 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		{ AT_UCACHEBSIZE, 0x0 },
 		{ AT_ICACHEBSIZE, 0x0 },
 		{ AT_DCACHEBSIZE, 0x0 },
-		/* path to executable */
-		{ AT_EXECFN, (long) (prog->path ? prog->path : prog->name) },
 		{ AT_SECURE, 0x0 },
 		{ AT_EGID, 0x0 },
 		{ AT_GID, 0x0 },
