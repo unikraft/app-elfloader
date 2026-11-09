@@ -199,12 +199,13 @@ static __u64 elf_arm64_hwcap(void)
 #define UK_AUXV_HWCAP		0x0
 #endif /* !CONFIG_ARCH_ARM_64 */
 
+/* `len` may be 0: an empty argument or environment string, which
+ * execve() allows, is pushed as its NUL alone. */
 static void infoblk_push(struct ukarch_ctx *ctx, void *buf, __sz len)
 {
 	UK_ASSERT(ctx);
 	UK_ASSERT(ctx->sp);
 	UK_ASSERT(buf);
-	UK_ASSERT(len);
 
 	ctx->sp -= len + 1;
 	memcpy((void *)ctx->sp, buf, len);
@@ -294,11 +295,24 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 			    (uint64_t) prog->interp.prog->entry);
 	}
 
+	/* AT_RANDOM points at 16 bytes the program may read at any time
+	 * (Go's runtime seeds from them) and may overwrite.  `rand` lives in
+	 * the caller's frame, which is stale by the time an execve()d program
+	 * runs, so copy the bytes to the program's stack, as Linux does.
+	 */
+	ctx->sp -= sizeof(uint64_t) * 2;
+	memcpy((void *)ctx->sp, rand, sizeof(uint64_t) * 2);
+	rand = (uint64_t *)ctx->sp;
+
 	/* list of all auxiliary vector entries whose pointer values need
 	 * to point to information block areas
 	 */
 	struct auxv_entry infoblk_auxv[] = {
 		{ AT_PLATFORM, (__uptr)UK_AUXV_PLATFORM	},
+		/* path to executable: the caller's string, which execve()
+		 * unmaps with the image it replaces
+		 */
+		{ AT_EXECFN, (__uptr)(prog->path ? prog->path : prog->name) },
 	};
 
 	/* list of all auxiliary vector entries whose pointer values need
@@ -309,8 +323,6 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		{ AT_UCACHEBSIZE, 0x0 },
 		{ AT_ICACHEBSIZE, 0x0 },
 		{ AT_DCACHEBSIZE, 0x0 },
-		/* path to executable */
-		{ AT_EXECFN, (long) (prog->path ? prog->path : prog->name) },
 		{ AT_SECURE, 0x0 },
 		{ AT_EGID, 0x0 },
 		{ AT_GID, 0x0 },
