@@ -70,6 +70,7 @@ config APPELFLOADER_PROCESS_VAS
 		Prepare an initial process with an owned address space and guarded
 		application stack. The NOLIBC kernel keeps its shared allocator.
 		Images outside the supported process range fail before publication.
+		Enable ukboot init when descendants must outlive the initial image.
 
 config APPELFLOADER_CUSTOMAPPNAME
 	bool "Application name/path via command line"

@@ -62,6 +62,7 @@
 #include <sys/wait.h>
 #include <uk/crash.h>
 #include <uk/process/prepared.h>
+#include <uk/syscall.h>
 #include <uk/vmem/process.h>
 #include <uk/vmem/vma_types.h>
 #endif
@@ -613,5 +614,10 @@ out:
 	if (progname_conv && !PTRISERR(progname_conv))
 		free(progname_conv);
 #endif /* CONFIG_APPELFLOADER_VFSEXEC */
+#if CONFIG_APPELFLOADER_PROCESS_VAS && CONFIG_LIBUKBOOT_INIT
+	/* Let init reap descendants before deciding when to shut down. */
+	uk_syscall_r(SYS_exit_group, (long)ret);
+	UK_CRASH("Loader process termination unexpectedly returned\n");
+#endif
 	return ret;
 }
