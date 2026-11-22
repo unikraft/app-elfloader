@@ -20,6 +20,7 @@
 static int uk_binfmt_load_elf(struct uk_binfmt_loader_args *args)
 {
 	struct elf_prog *prog;
+	const char *argv0;
 	__u64 rand[2];
 	int rc;
 
@@ -61,16 +62,16 @@ static int uk_binfmt_load_elf(struct uk_binfmt_loader_args *args)
 	rand[1] = 0xF00D;
 #endif /* !CONFIG_LIBUKRANDOM */
 
-	rc = elf_arg_env_count(&args->argc, args->argv,
-			       &args->envc, args->envp,
-			       args->stack_size);
+	/* An empty vector starts with one empty argument, as on Linux. */
+	argv0 = args->argv && args->argv[0] ? NULL : "";
+	rc = elf_ctx_check_args(prog, argv0, &args->argc, args->argv,
+				&args->envc, args->envp, args->stack_size);
 	if (unlikely(rc < 0)) {
 		uk_pr_err("Could not load ELF (%d)\n", rc);
 		goto unload;
 	}
 
-	elf_ctx_init(&args->ctx, prog, args->argv[0],
-		     args->argc - 1, &args->argv[1],
+	elf_ctx_init(&args->ctx, prog, argv0, args->argc, args->argv,
 		     args->envc, args->envp, rand);
 
 	args->user = prog;

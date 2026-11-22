@@ -46,6 +46,7 @@
  * header of this file.
  */
 
+#include <errno.h>
 #include <limits.h>
 #include <string.h>
 #include <uk/assert.h>
@@ -215,8 +216,9 @@ int elf_arg_env_count(int *argc, const char **argv,
 		      __sz stack_sz)
 {
 	const char **a;
-	__sz len;
+	__sz len, size, limit = MAX((__sz)ARG_MAX, stack_sz / 4);
 
+	limit = MIN(limit, (__sz)INT_MAX);
 	*argc = *envc = len = 0;
 	if (!argv && !envp)
 		return 0;
@@ -224,15 +226,25 @@ int elf_arg_env_count(int *argc, const char **argv,
 	/* count argv */
 	if (argv)
 		for (a = argv; *a; ++a) {
+			if (*argc == INT_MAX)
+				return -E2BIG;
+			size = strnlen(*a, limit - len + 1);
+			if (size > limit - len)
+				return -E2BIG;
 			++*argc;
-			len += strlen(*a);
+			len += size;
 		}
 
 	/* count envp */
 	if (envp)
 		for (a = envp; *a; ++a) {
+			if (*envc == INT_MAX)
+				return -E2BIG;
+			size = strnlen(*a, limit - len + 1);
+			if (size > limit - len)
+				return -E2BIG;
 			++*envc;
-			len += strlen(*a);
+			len += size;
 		}
 
 	/* POSIX defines the minimum total size of argv + envp to ARG_MAX,
@@ -256,16 +268,87 @@ int elf_arg_env_count(int *argc, const char **argv,
 	return len;
 }
 
+/* Leave room for all auxiliary entries, random seed and stack alignment. */
+#define ELF_CTX_AUXV_MAX 32
+#define ELF_CTX_FIXED_BYTES \
+	(ELF_CTX_AUXV_MAX * sizeof(struct auxv_entry) + \
+	 sizeof(UK_AUXV_PLATFORM) + 2 * sizeof(uint64_t) + 3 + \
+	 2 * UKARCH_SP_ALIGN + 2 * sizeof(uintptr_t))
+
+static int elf_stack_string(__sz *left, const char *string)
+{
+	__sz len;
+
+	if (!*left)
+		return -E2BIG;
+	len = strnlen(string, *left);
+	if (len == *left)
+		return -E2BIG;
+	*left -= len + 1;
+	return 0;
+}
+
+int elf_ctx_check_args(struct elf_prog *prog, const char *argv0,
+		       int *argc, const char *argv[], int *envc,
+		       const char *envp[], __sz stack_sz)
+{
+	__sz left, slots;
+	int bytes, rc;
+
+	bytes = elf_arg_env_count(argc, argv, envc, envp, stack_sz);
+	if (bytes < 0)
+		return bytes;
+	if (!argv0 && !*argc)
+		return -EINVAL;
+	if (*argc == INT_MAX)
+		return -E2BIG;
+	if (stack_sz < ELF_CTX_FIXED_BYTES)
+		return -E2BIG;
+	left = stack_sz - ELF_CTX_FIXED_BYTES;
+	/* argc, both vector terminators, and an optional prepended argument. */
+	slots = (__sz)*argc + (__sz)*envc + 3 + !!argv0;
+	if (slots > left / sizeof(uintptr_t))
+		return -E2BIG;
+	left -= slots * sizeof(uintptr_t);
+	if ((__sz)bytes > left)
+		return -E2BIG;
+	left -= bytes;
+	/* The count above excludes each string's terminating byte. */
+	if ((__sz)*argc + (__sz)*envc > left)
+		return -E2BIG;
+	left -= (__sz)*argc + (__sz)*envc;
+	if (argv0) {
+		rc = elf_stack_string(&left, argv0);
+		if (rc)
+			return rc;
+	}
+	return elf_stack_string(&left, prog->path ? prog->path : prog->name);
+}
+
+static void elf_ctx_push_vector(struct ukarch_ctx *ctx, uintptr_t strings,
+				int count)
+{
+	uintptr_t *vector;
+	int i;
+
+	ctx->sp -= ((__sz)count + 1) * sizeof(*vector);
+	vector = (uintptr_t *)ctx->sp;
+	for (i = 0; i < count; i++) {
+		vector[i] = strings;
+		strings += strlen((const char *)strings) + 1;
+	}
+	vector[count] = 0;
+}
+
 void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		  const char *argv0, int argc, const char *argv[],
 		  int envc, const char *environ[],
 		  uint64_t rand[2])
 {
 	int args_count = argc + (argv0 ? 1 : 0);
-	char *infoblk_argvp[args_count];
-	char *infoblk_envp[envc];
-	uintptr_t random_sp;
-	int i, elfvec_len;
+	uintptr_t random_sp, argv_sp, envp_sp;
+	__sz elfvec_len;
+	int i;
 
 	UK_ASSERT(prog);
 	UK_ASSERT(argv0 || ((argc >= 1) && argv));
@@ -343,6 +426,9 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 	};
 	struct auxv_entry auxv_null = { AT_NULL, 0x0 };
 
+	UK_CTASSERT(ARRAY_SIZE(auxv) + ARRAY_SIZE(infoblk_auxv) + 1 <=
+		    ELF_CTX_AUXV_MAX);
+
 	for (i = (int)ARRAY_SIZE(infoblk_auxv) - 1; i >= 0; i--) {
 		infoblk_push(ctx, (void *)infoblk_auxv[i].val,
 			     strlen((const char*)infoblk_auxv[i].val));
@@ -356,20 +442,16 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		for (i = envc - 1; i >= 0; i--) {
 			infoblk_push(ctx, (void *)environ[i],
 				     strlen(environ[i]));
-			infoblk_envp[i] = (char *)ctx->sp;
 		}
+	envp_sp = ctx->sp;
 
 	if (argc)
-		for (i = argc; i >= 1; i--) {
-			infoblk_push(ctx, (void *)argv[i - 1],
-				     strlen(argv[i - 1]));
-			infoblk_argvp[i] = (char *)ctx->sp;
-		}
+		for (i = argc - 1; i >= 0; i--)
+			infoblk_push(ctx, (void *)argv[i], strlen(argv[i]));
 
-	if (argv0) {
+	if (argv0)
 		infoblk_push(ctx, (void *)argv0, strlen(argv0));
-		infoblk_argvp[0] = (char *)ctx->sp;
-	}
+	argv_sp = ctx->sp;
 
 	/* Add a NULL terminator before argv0 as the cherry on top (bottom?)
 	 * and re-align stack to prepare it for what's about to be pushed
@@ -389,9 +471,10 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 	 * - environment variables (plus extra NULL pointer);
 	 * - arguments (plus extra NULL pointer and argument count (long))
 	 */
-	elfvec_len = ((ARRAY_SIZE(auxv) + 1) * sizeof(struct auxv_entry))
-		+ (envc + 1) * sizeof(uintptr_t)
-		+ (argc + (argv0 ? 1 : 0) + 1) * sizeof(uintptr_t)
+	elfvec_len = ((ARRAY_SIZE(auxv) + ARRAY_SIZE(infoblk_auxv) + 1) *
+		      sizeof(struct auxv_entry))
+		+ ((__sz)envc + 1) * sizeof(uintptr_t)
+		+ ((__sz)args_count + 1) * sizeof(uintptr_t)
 		+ sizeof(long);
 
 	ctx->sp = ALIGN_DOWN(ctx->sp - elfvec_len, UKARCH_SP_ALIGN)
@@ -409,28 +492,9 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 	for (i = (int)ARRAY_SIZE(auxv) - 1; i >= 0; --i)
 		ukarch_rctx_stackpush_packed(ctx, auxv[i]);
 
-	/*
-	 * envp
-	 */
-	/* NOTE: As expected, this will push NULL to the stack first */
-	ukarch_rctx_stackpush_packed(ctx, (long)NULL);
-	if (environ) {
-		for (i = envc - 1; i >= 0; --i) {
-			uk_pr_debug("env[%d]=\"%s\"\n", i, infoblk_envp[i]);
-			ukarch_rctx_stackpush_packed(ctx,
-						     (__uptr)infoblk_envp[i]);
-		}
-	}
-
-	/*
-	 * argv + argc
-	 */
-	/* Same as envp, pushing NULL first */
-	ukarch_rctx_stackpush_packed(ctx, (long)NULL);
-	if (args_count)
-		for (i = args_count - 1; i >= 0; i--)
-			ukarch_rctx_stackpush_packed(ctx,
-						     (__uptr)infoblk_argvp[i]);
+	/* Build vectors in the user stack with bounded kernel storage. */
+	elf_ctx_push_vector(ctx, envp_sp, envc);
+	elf_ctx_push_vector(ctx, argv_sp, args_count);
 	ukarch_rctx_stackpush_packed(ctx, (long)args_count);
 
 	UK_ASSERT(IS_ALIGNED(ctx->sp, UKARCH_SP_ALIGN));

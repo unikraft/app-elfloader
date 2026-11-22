@@ -145,20 +145,15 @@ void elf_release_metadata(struct elf_prog *elf_prog);
  *   Loaded ELF program (e.g., `elf_load_img()`)
  * @param argv0:
  *   Optional c-string that is prepended to the argument vector (see `argv`)
- *   for the application. If used, do not release/modify while the returned
- *   `ctx` and `prog` are in use.
+ *   for the application. Copied to the application stack during this call.
  * @param argc:
  *   Argument count; can be only `0` if `argv0` is given, must be > 0 otherwise.
  * @param argv:
  *   Argument vector, only optional if `argv0` is given.
- *   This function will only copy the c-string references of argv to the
- *   application. The actual c-strings should not be released/modified while
- *   `ctx` and `prog` are in use.
+ *   Strings are copied to the application stack during this call.
  * @param environ:
  *   NULL-terminated list of environment variables
- *   This function will only copy the c-string references of environ to the
- *   application. The actual c-strings should not be released/modified while
- *   `ctx` and `prog` are in use.
+ *   Strings are copied to the application stack during this call.
  * @param rand:
  *   Random seed that is passed to the application
  *   The seed is copied into the application stack. The caller may release
@@ -168,6 +163,16 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		  const char *argv0, int argc, const char *argv[],
 		  int envc, const char *environ[],
 		  uint64_t rand[2]);
+
+/**
+ * Check the complete initial stack budget before calling elf_ctx_init().
+ * Arguments must remain resident and unchanged until construction completes.
+ * Counts exclude the optional prepended argv0; at least one argument is needed.
+ * Returns zero on success or a negative error, including -E2BIG.
+ */
+int elf_ctx_check_args(struct elf_prog *prog, const char *argv0,
+		       int *argc, const char *argv[], int *envc,
+		       const char *envp[], __sz stack_sz);
 
 /**
  * Count the number of args and env vars.

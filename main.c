@@ -211,29 +211,6 @@ static int elf_process_stack(struct uk_vas *vas, __sz len, __vaddr_t *top)
 	return rc;
 }
 
-static int elf_process_args(struct elf_prog *prog, const char *name,
-			    const char *argv[], __sz stack_len,
-			    int *argc, int *envc)
-{
-	__sz left, slots, strings;
-	int bytes = elf_arg_env_count(argc, argv, envc, environ, stack_len);
-
-	if (bytes < 0)
-		return bytes;
-	/* Reserve a page for the fixed auxiliary vector, seed and alignment. */
-	if (stack_len < UK_PAGING_PAGE_SIZE ||
-	    (__sz)bytes > stack_len - UK_PAGING_PAGE_SIZE)
-		return -E2BIG;
-	left = stack_len - UK_PAGING_PAGE_SIZE - bytes;
-	slots = (__sz)*argc + (__sz)*envc + 4;
-	if (slots > left / sizeof(uintptr_t))
-		return -E2BIG;
-	left -= slots * sizeof(uintptr_t);
-	strings = (__sz)*argc + (__sz)*envc + strlen(name) + 1 +
-		strlen(prog->path ? prog->path : prog->name) + 1;
-	return strings > left ? -E2BIG : 0;
-}
-
 static int elf_process_run(const char *name, const char *path __unused,
 			   void *image __unused, size_t image_len __unused,
 			   const char *argv[])
@@ -291,7 +268,8 @@ static int elf_process_run(const char *name, const char *path __unused,
 		prog = NULL;
 		goto error;
 	}
-	rc = elf_process_args(prog, name, argv, stack_len, &argc, &envc);
+	rc = elf_ctx_check_args(prog, name, &argc, argv, &envc, environ,
+				stack_len);
 	if (!rc)
 		rc = elf_process_stack(vas, stack_len, &top);
 	if (rc)
@@ -364,6 +342,7 @@ int main(int argc, const char *argv[])
 	struct elf_prog *prog;
 	struct uk_thread *app_thread;
 	struct uk_sched *s = uk_sched_current();
+	const __sz stack_size = PAGES2BYTES(CONFIG_APPELFLOADER_STACK_NBPAGES);
 	uint64_t rand[2];
 	int ret = 0;
 #if CONFIG_APPELFLOADER_VFSEXEC_ENVPATH
@@ -560,8 +539,8 @@ int main(int argc, const char *argv[])
 #endif /* !CONFIG_LIBUKRANDOM */
 
 	uk_pr_debug("%s: Prepare application thread...\n", progname);
-	ret = elf_arg_env_count(&argc, argv, &envc, environ,
-				PAGES2BYTES(CONFIG_APPELFLOADER_STACK_NBPAGES));
+	ret = elf_ctx_check_args(prog, progname, &argc, argv, &envc,
+				 environ, stack_size);
 	if (unlikely(ret < 0)) {
 		uk_pr_err("Args + env size exceeds limit, increase stack size\n");
 		goto out_free_thread;
