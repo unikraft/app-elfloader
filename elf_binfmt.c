@@ -43,9 +43,6 @@ static int uk_binfmt_load_elf(struct uk_binfmt_loader_args *args)
 		return rc;
 	}
 
-	/* Save to private data in case we are requested to unload */
-	args->user = (void *)prog;
-
 	uk_pr_debug("%s: ELF loaded to 0x%lx-0x%lx (%lx B)\n", args->progname,
 		    (__u64)prog->vabase, (__u64)prog->vabase + prog->valen,
 		    prog->valen);
@@ -55,7 +52,7 @@ static int uk_binfmt_load_elf(struct uk_binfmt_loader_args *args)
 	rc = uk_random_fill_buffer(rand, sizeof(rand));
 	if (unlikely(rc)) {
 		uk_pr_err("Could not get random bytes (%d)\n", rc);
-		return rc;
+		goto unload;
 	}
 #else /* !CONFIG_LIBUKRANDOM */
 	/* Without random numbers, use a hardcoded seed */
@@ -69,15 +66,18 @@ static int uk_binfmt_load_elf(struct uk_binfmt_loader_args *args)
 			       args->stack_size);
 	if (unlikely(rc < 0)) {
 		uk_pr_err("Could not load ELF (%d)\n", rc);
-		elf_unload(prog);
-		return rc;
+		goto unload;
 	}
 
 	elf_ctx_init(&args->ctx, prog, args->argv[0],
 		     args->argc - 1, &args->argv[1],
 		     args->envc, args->envp, rand);
 
+	args->user = prog;
 	return UK_BINFMT_HANDLED;
+unload:
+	elf_unload(prog);
+	return rc;
 }
 
 static int uk_binfmt_unload_elf(struct uk_binfmt_loader_args *args)
@@ -86,9 +86,19 @@ static int uk_binfmt_unload_elf(struct uk_binfmt_loader_args *args)
 	UK_ASSERT(args->user);
 
 	elf_unload((struct elf_prog *)args->user);
+	args->user = NULL;
 
 	return UK_BINFMT_HANDLED;
 }
+
+#ifdef UK_BINFMT_HAS_RELEASE_METADATA
+static void uk_binfmt_release_elf_metadata(struct uk_binfmt_loader_args *args)
+{
+	UK_ASSERT(args && args->user);
+	elf_release_metadata(args->user);
+	args->user = NULL;
+}
+#endif
 
 static struct uk_binfmt_loader elf_loader = {
 	.name = "ELF loader",
@@ -96,6 +106,9 @@ static struct uk_binfmt_loader elf_loader = {
 	.ops = {
 		.load = uk_binfmt_load_elf,
 		.unload = uk_binfmt_unload_elf,
+#ifdef UK_BINFMT_HAS_RELEASE_METADATA
+		.release_metadata = uk_binfmt_release_elf_metadata,
+#endif
 	},
 };
 
