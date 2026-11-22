@@ -56,6 +56,37 @@ choice
 			Only statically-linked PIE executables are supported.
 endchoice
 
+config APPELFLOADER_PROCESS_VAS
+	bool "Load native applications into a private process address space"
+	depends on APPELFLOADER_VFSEXEC && LIBPOSIX_FUTEX
+	depends on LIBNOLIBC && LIBPOSIX_MMAP && LIBUKPLAT_NATIVE_PAGING
+	depends on LIBUKVMEM_THREAD_VAS && LIBUKPAGING_DIRECTMAP
+	depends on LIBPOSIX_PROCESS_MULTIPROCESS && LIBPOSIX_PROCESS_SIGNAL
+	depends on LIBPOSIX_FDTAB_MULTITAB && LIBPOSIX_FDIO_VMA && !LIBVFSCORE
+	select LIBPOSIX_PROCESS_PREPARE
+	select LIBPOSIX_FUTEX_VAS
+	default n
+	help
+		Prepare an initial process with an owned address space and guarded
+		application stack. The NOLIBC kernel keeps its shared allocator.
+		Images outside the supported process range fail before publication.
+		Enable ukboot init when descendants must outlive the initial image.
+
+config APPELFLOADER_PROCESS_SESSION_TEST
+	bool "Test complete private process session retirement"
+	depends on APPELFLOADER_PROCESS_VAS && LIBPOSIX_PROCESS_FORK
+	depends on LIBUKBOOT_INIT
+	select LIBPOSIX_TIME
+	select LIBUKPAGING_STATS
+	default n
+	help
+		Run eight fresh application address spaces from the kernel loader.
+		After four warmup sessions, require identical allocator, process
+		and descriptor inventories after every complete application teardown.
+		Account physical frames together with committed kernel heap backing
+		and page tables; keep other mappings and VMA reservations identical.
+		All shared user address-space aliases must be released.
+
 config APPELFLOADER_CUSTOMAPPNAME
 	bool "Application name/path via command line"
 	default y if APPELFLOADER_VFSEXEC
@@ -112,9 +143,10 @@ endif
 
 config APPELFLOADER_STACK_NBPAGES
 	int "Application stack size (number of pages)"
-	default 32
+	default 2048
 	help
-		<n> * 4K; 2 = 8KB, 16 = 64KB, 256 = 1MB ...
+		Usable program stack size, excluding guard pages. The default
+		is 8 MiB with 4 KiB pages.
 
 config APPELFLOADER_DEBUG
        bool "Enable debug messages"
@@ -199,3 +231,9 @@ choice
 			If a configuration file was already found in the filesystem
 endchoice
 endif
+
+config APPELFLOADER_STACK_TEST
+	bool "Test ELF initial stack bounds and ownership"
+	depends on LIBNOLIBC && LIBUKALLOC
+	select LIBUKTEST
+	default n

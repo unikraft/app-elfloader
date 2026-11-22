@@ -57,6 +57,19 @@
 #endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPATH */
 
 #include "elf_prog.h"
+#if CONFIG_APPELFLOADER_PROCESS_SESSION_TEST
+#include "elf_session.h"
+#endif
+#if CONFIG_APPELFLOADER_PROCESS_VAS
+#include <errno.h>
+#include <sys/wait.h>
+#include <uk/crash.h>
+#include <uk/process/prepared.h>
+#include <uk/syscall.h>
+#include <uk/vmem/process.h>
+#include <uk/vmem/vma_types.h>
+#endif
+
 
 #if CONFIG_LIBPOSIX_ENVIRON
 extern const char **environ;
@@ -180,6 +193,177 @@ static __constructor void _libelf_init(void) {
 		UK_CRASH("Failed to initialize libelf: Version error");
 }
 
+#if CONFIG_APPELFLOADER_PROCESS_VAS
+static int elf_process_stack(struct uk_vas *vas, __sz len, __vaddr_t *top)
+{
+	__vaddr_t base;
+	int rc;
+
+	if (!len || len > vas->range_end - vas->range_start -
+	    2 * UK_PAGING_PAGE_SIZE)
+		return -E2BIG;
+	base = vas->range_end - len - 2 * UK_PAGING_PAGE_SIZE;
+	rc = uk_vma_map_anon(vas, &base, len + 2 * UK_PAGING_PAGE_SIZE,
+			     UK_PAGING_PAGE_ATTR_PROT_NONE, 0, "user stack");
+	if (rc)
+		return rc;
+	rc = uk_vma_set_attr(vas, base + UK_PAGING_PAGE_SIZE, len,
+			     UK_PAGING_PAGE_ATTR_PROT_RW, 0);
+	if (!rc)
+		*top = base + UK_PAGING_PAGE_SIZE + len;
+	return rc;
+}
+
+static int elf_process_run(const char *name, const char *path __unused,
+			   void *image __unused, size_t image_len __unused,
+			   const char *argv[])
+{
+	struct uk_sched *sched = uk_sched_current();
+	struct uk_thread *current = uk_thread_current(), *child = NULL;
+	struct uk_vas *saved = current->vas, *vas = NULL;
+	struct elf_prog *prog = NULL;
+	const __sz stack_len = (__sz)CONFIG_APPELFLOADER_STACK_NBPAGES *
+		UK_PAGING_PAGE_SIZE;
+	__vaddr_t top;
+	__u64 random[2];
+	pid_t pid = -1, waited;
+	bool bound = false;
+	int argc, envc, status, rc;
+#if CONFIG_APPELFLOADER_VFSEXEC_ENVPWD
+	const char *pwd = getenv("PWD");
+#endif
+
+	if (uk_vas_get_active() != uk_vas_get_kernel()) {
+		rc = -EBUSY;
+		goto error;
+	}
+#if CONFIG_APPELFLOADER_VFSEXEC_ENVPWD
+	if (pwd && chdir(pwd)) {
+		rc = -errno;
+		goto error;
+	}
+#endif
+	/* The user stack belongs to the VAS, independently of the container. */
+	child = uk_thread_create_container(sched->a, NULL, 0,
+					   sched->a_auxstack, 0, sched->a_uktls,
+					   false, "elf-application",
+					   NULL, NULL);
+	if (!child) {
+		rc = -ENOMEM;
+		goto error;
+	}
+	pid = uk_posix_process_prepare_spawn(sched->a, child, &vas);
+	if (pid < 0) {
+		rc = pid;
+		goto error;
+	}
+	rc = uk_thread_set_vas(current, vas);
+	if (rc)
+		goto error;
+	bound = true;
+#if CONFIG_APPELFLOADER_INITRDEXEC
+	prog = elf_load_img(uk_alloc_get_default(), image, image_len, name);
+#else
+	prog = elf_load_vfs(uk_alloc_get_default(), path, name);
+#endif
+	if (!prog || PTRISERR(prog)) {
+		rc = prog ? PTR2ERR(prog) : -ENOEXEC;
+		prog = NULL;
+		goto error;
+	}
+	rc = elf_ctx_check_args(prog, name, &argc, argv, &envc, environ,
+				stack_len);
+	if (!rc)
+		rc = elf_process_stack(vas, stack_len, &top);
+	if (rc)
+		goto error;
+#if CONFIG_LIBUKRANDOM
+	rc = uk_random_fill_buffer(random, sizeof(random));
+	if (rc)
+		goto error;
+#else
+	random[0] = 0xB0B0;
+	random[1] = 0xF00D;
+#endif
+	child->ctx.sp = top;
+	elf_ctx_init(&child->ctx, prog, name, argc, argv, envc, environ,
+		     random);
+	elf_release_metadata(prog);
+	prog = NULL;
+	if (uk_thread_set_vas(current, saved))
+		UK_CRASH("Cannot restore loader address space\n");
+	bound = false;
+#ifdef UK_POSIX_PROCESS_HAS_PROGRAM_STACK_SIZE
+	uk_posix_process_set_stack_size(child, stack_len);
+#endif /* UK_POSIX_PROCESS_HAS_PROGRAM_STACK_SIZE */
+	rc = uk_sched_thread_add(sched, child);
+	if (rc)
+		goto error;
+	rc = uk_posix_process_publish_prepared(child);
+	if (rc) {
+		if (uk_sched_thread_remove(child))
+			UK_CRASH("Cannot withdraw prepared application\n");
+		goto error;
+	}
+	/* Process and thread pins retain the VAS through execution and exec. */
+	uk_vas_put(vas);
+	vas = NULL;
+	uk_thread_wake(child);
+	child = NULL;
+	do {
+		waited = waitpid(pid, &status, 0);
+	} while (waited < 0 && errno == EINTR);
+	if (waited != pid)
+		return 1;
+	if (WIFEXITED(status))
+		return WEXITSTATUS(status);
+	return WIFSIGNALED(status) ? 128 + WTERMSIG(status) : 1;
+error:
+	if (prog)
+		elf_release_metadata(prog);
+	if (bound && uk_thread_set_vas(current, saved))
+		UK_CRASH("Cannot restore failed loader address space\n");
+	if (pid > 0 && uk_posix_process_abort_prepared(child))
+		UK_CRASH("Cannot abort prepared application\n");
+	if (child)
+		uk_thread_release(child);
+	uk_vas_put(vas);
+	uk_pr_err("Cannot start %s (%d)\n", name, rc);
+	return 1;
+}
+
+#if CONFIG_APPELFLOADER_PROCESS_SESSION_TEST
+struct elf_session_args {
+	const char *name;
+	const char *path;
+	void *image;
+	size_t image_len;
+	const char **argv;
+};
+
+static int elf_process_session_run(void *arg)
+{
+	struct elf_session_args *args = arg;
+
+	return elf_process_run(args->name, args->path, args->image,
+			       args->image_len, args->argv);
+}
+
+static int elf_process_entry(const char *name, const char *path, void *image,
+			     size_t image_len, const char *argv[])
+{
+	struct elf_session_args args = {
+		.name = name, .path = path, .image = image,
+		.image_len = image_len, .argv = argv
+	};
+
+	return elf_session_observe(elf_process_session_run, &args);
+}
+#else
+#define elf_process_entry elf_process_run
+#endif
+#endif /* CONFIG_APPELFLOADER_PROCESS_VAS */
+
 int main(int argc, const char *argv[])
 {
 #if CONFIG_APPELFLOADER_INITRDEXEC
@@ -195,6 +379,7 @@ int main(int argc, const char *argv[])
 	struct elf_prog *prog;
 	struct uk_thread *app_thread;
 	struct uk_sched *s = uk_sched_current();
+	const __sz stack_size = PAGES2BYTES(CONFIG_APPELFLOADER_STACK_NBPAGES);
 	uint64_t rand[2];
 	int ret = 0;
 #if CONFIG_APPELFLOADER_VFSEXEC_ENVPATH
@@ -226,7 +411,8 @@ int main(int argc, const char *argv[])
 	progname      = basename_internal(progname_conv);
 #endif /* CONFIG_APPELFLOADER_VFSEXEC */
 
-#if CONFIG_LIBPOSIX_PROCESS_EXECVE && CONFIG_APPELFLOADER_VFSEXEC
+#if CONFIG_LIBPOSIX_PROCESS_EXECVE && CONFIG_APPELFLOADER_VFSEXEC && \
+	!CONFIG_APPELFLOADER_PROCESS_VAS
 	/* Cut off kernel name (argv[0]) from argument vector */
 	argv = &argv[1];
 	argc -= 1;
@@ -276,7 +462,8 @@ int main(int argc, const char *argv[])
 	}
 #endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPATH */
 
-#if CONFIG_LIBPOSIX_PROCESS_EXECVE && CONFIG_APPELFLOADER_VFSEXEC
+#if CONFIG_LIBPOSIX_PROCESS_EXECVE && CONFIG_APPELFLOADER_VFSEXEC && \
+	!CONFIG_APPELFLOADER_PROCESS_VAS
 	ret = execve(realpath ? realpath : path,
 		     (char * const *)argv, (char * const *)environ);
 	if (unlikely(ret)) {
@@ -299,6 +486,17 @@ int main(int argc, const char *argv[])
 	uk_pr_info("Image at %p, len %"__PRIsz" bytes\n",
 		   (void *) img->vbase, img->len);
 #endif /* CONFIG_APPELFLOADER_INITRDEXEC */
+
+#if CONFIG_APPELFLOADER_PROCESS_VAS
+#if CONFIG_APPELFLOADER_INITRDEXEC
+	ret = elf_process_entry(progname, NULL, (void *)img->vbase, img->len,
+				argv);
+#else
+	ret = elf_process_entry(progname, realpath ? realpath : path, NULL, 0,
+				argv);
+#endif
+	goto out;
+#endif
 
 	/*
 	 * Create thread container
@@ -378,8 +576,8 @@ int main(int argc, const char *argv[])
 #endif /* !CONFIG_LIBUKRANDOM */
 
 	uk_pr_debug("%s: Prepare application thread...\n", progname);
-	ret = elf_arg_env_count(&argc, argv, &envc, environ,
-				PAGES2BYTES(CONFIG_APPELFLOADER_STACK_NBPAGES));
+	ret = elf_ctx_check_args(prog, progname, &argc, argv, &envc,
+				 environ, stack_size);
 	if (unlikely(ret < 0)) {
 		uk_pr_err("Args + env size exceeds limit, increase stack size\n");
 		goto out_free_thread;
@@ -396,6 +594,9 @@ int main(int argc, const char *argv[])
 		uk_pr_err("Could not create pthread\n");
 		goto out_free_thread;
 	}
+#ifdef UK_POSIX_PROCESS_HAS_PROGRAM_STACK_SIZE
+	uk_posix_process_set_stack_size(app_thread, stack_size);
+#endif /* UK_POSIX_PROCESS_HAS_PROGRAM_STACK_SIZE */
 #endif /* CONFIG_LIBPOSIX_PROCESS_MULTITHREADING */
 
 	uk_pr_debug("%s: Application stack at %p - %p, pointer: %p\n",
@@ -432,5 +633,10 @@ out:
 	if (progname_conv && !PTRISERR(progname_conv))
 		free(progname_conv);
 #endif /* CONFIG_APPELFLOADER_VFSEXEC */
+#if CONFIG_APPELFLOADER_PROCESS_VAS && CONFIG_LIBUKBOOT_INIT
+	/* Let init reap descendants before deciding when to shut down. */
+	uk_syscall_r(SYS_exit_group, (long)ret);
+	UK_CRASH("Loader process termination unexpectedly returned\n");
+#endif
 	return ret;
 }
