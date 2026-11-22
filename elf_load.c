@@ -847,16 +847,30 @@ static void elf_unload_ptunprotect(struct elf_prog *elf_prog)
 #define elf_unload_ptunprotect(p) do {} while (0)
 #endif /* !CONFIG_LIBUKVMEM */
 
-void elf_unload(struct elf_prog *elf_prog)
+static void elf_release_resources(struct elf_prog *elf_prog, bool mappings)
 {
 	if (elf_prog->interp.prog && !PTRISERR(elf_prog->interp.prog))
-		elf_unload(elf_prog->interp.prog);
+		elf_release_resources(elf_prog->interp.prog, mappings);
 	if (elf_prog->interp.path)
 		free(elf_prog->interp.path);
-	elf_unload_ptunprotect(elf_prog);
-	elf_unload_vaimg(elf_prog);
+	if (mappings) {
+		elf_unload_ptunprotect(elf_prog);
+		elf_unload_vaimg(elf_prog);
+	}
 	uk_free(elf_prog->a, elf_prog);
 }
+
+void elf_unload(struct elf_prog *elf_prog)
+{
+	elf_release_resources(elf_prog, true);
+}
+
+#if CONFIG_LIBPOSIX_MMAP
+void elf_release_metadata(struct elf_prog *elf_prog)
+{
+	elf_release_resources(elf_prog, false);
+}
+#endif
 
 struct elf_prog *elf_load_img(struct uk_alloc *a, void *img_base,
 			      size_t img_len, const char *progname)

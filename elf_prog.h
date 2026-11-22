@@ -124,6 +124,15 @@ struct elf_prog *elf_load_vfs(struct uk_alloc *a, const char *path,
  */
 void elf_unload(struct elf_prog *elf_prog);
 
+#if CONFIG_LIBPOSIX_MMAP
+/**
+ * Release loader metadata after image mappings have been transferred to an
+ * owned process VAS. The VAS retains all mapped image pages and protections.
+ * Auxiliary vector strings must already be copied to the application stack.
+ */
+void elf_release_metadata(struct elf_prog *elf_prog);
+#endif
+
 /**
  * Initializes an ukarch_ctx with a loaded ELF program. This program
  * will be executed as soon as the context is scheduled/loaded to
