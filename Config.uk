@@ -215,3 +215,9 @@ choice
 			If a configuration file was already found in the filesystem
 endchoice
 endif
+
+config APPELFLOADER_STACK_TEST
+	bool "Test ELF initial stack bounds and ownership"
+	depends on LIBNOLIBC && LIBUKALLOC
+	select LIBUKTEST
+	default n
