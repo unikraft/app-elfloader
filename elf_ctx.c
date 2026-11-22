@@ -204,7 +204,6 @@ static void infoblk_push(struct ukarch_ctx *ctx, void *buf, __sz len)
 	UK_ASSERT(ctx);
 	UK_ASSERT(ctx->sp);
 	UK_ASSERT(buf);
-	UK_ASSERT(len);
 
 	ctx->sp -= len + 1;
 	memcpy((void *)ctx->sp, buf, len);
@@ -265,6 +264,7 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 	int args_count = argc + (argv0 ? 1 : 0);
 	char *infoblk_argvp[args_count];
 	char *infoblk_envp[envc];
+	uintptr_t random_sp;
 	int i, elfvec_len;
 
 	UK_ASSERT(prog);
@@ -294,11 +294,17 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 			    (uint64_t) prog->interp.prog->entry);
 	}
 
+	/* Keep the seed in the application's stack, independently of callers.
+	 */
+	infoblk_push(ctx, rand, 2 * sizeof(rand[0]));
+	random_sp = ctx->sp;
+
 	/* list of all auxiliary vector entries whose pointer values need
 	 * to point to information block areas
 	 */
 	struct auxv_entry infoblk_auxv[] = {
 		{ AT_PLATFORM, (__uptr)UK_AUXV_PLATFORM	},
+		{ AT_EXECFN, (long)(prog->path ? prog->path : prog->name) },
 	};
 
 	/* list of all auxiliary vector entries whose pointer values need
@@ -309,8 +315,6 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		{ AT_UCACHEBSIZE, 0x0 },
 		{ AT_ICACHEBSIZE, 0x0 },
 		{ AT_DCACHEBSIZE, 0x0 },
-		/* path to executable */
-		{ AT_EXECFN, (long) (prog->path ? prog->path : prog->name) },
 		{ AT_SECURE, 0x0 },
 		{ AT_EGID, 0x0 },
 		{ AT_GID, 0x0 },
@@ -324,7 +328,7 @@ void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		/* base addr of interpreter */
 		{ AT_BASE, prog->interp.prog ?
 			   prog->interp.prog->start : 0x0 },
-		{ AT_RANDOM, (uintptr_t) rand },
+		{ AT_RANDOM, random_sp },
 		{ AT_PHENT, prog->phdr.entsize },
 		{ AT_PHNUM, prog->phdr.num },
 		{ AT_PHDR, (__uptr)prog->vabase + prog->phdr.off },

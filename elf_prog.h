@@ -152,8 +152,8 @@ void elf_unload(struct elf_prog *elf_prog);
  *   `ctx` and `prog` are in use.
  * @param rand:
  *   Random seed that is passed to the application
- *   Only a reference to rand[] is handed over to the application. Do not
- *   release/modify while `ctx` and `prog` are in use.
+ *   The seed is copied into the application stack. The caller may release
+ *   or modify rand[] after this function returns.
  */
 void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		  const char *argv0, int argc, const char *argv[],
