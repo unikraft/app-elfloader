@@ -143,9 +143,10 @@ endif
 
 config APPELFLOADER_STACK_NBPAGES
 	int "Application stack size (number of pages)"
-	default 32
+	default 2048
 	help
-		<n> * 4K; 2 = 8KB, 16 = 64KB, 256 = 1MB ...
+		Usable program stack size, excluding guard pages. The default
+		is 8 MiB with 4 KiB pages.
 
 config APPELFLOADER_DEBUG
        bool "Enable debug messages"
