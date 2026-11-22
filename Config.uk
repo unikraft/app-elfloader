@@ -72,6 +72,21 @@ config APPELFLOADER_PROCESS_VAS
 		Images outside the supported process range fail before publication.
 		Enable ukboot init when descendants must outlive the initial image.
 
+config APPELFLOADER_PROCESS_SESSION_TEST
+	bool "Test complete private process session retirement"
+	depends on APPELFLOADER_PROCESS_VAS && LIBPOSIX_PROCESS_FORK
+	depends on LIBUKBOOT_INIT
+	select LIBPOSIX_TIME
+	select LIBUKPAGING_STATS
+	default n
+	help
+		Run eight fresh application address spaces from the kernel loader.
+		After four warmup sessions, require identical allocator, process
+		and descriptor inventories after every complete application teardown.
+		Account physical frames together with committed kernel heap backing
+		and page tables; keep other mappings and VMA reservations identical.
+		All shared user address-space aliases must be released.
+
 config APPELFLOADER_CUSTOMAPPNAME
 	bool "Application name/path via command line"
 	default y if APPELFLOADER_VFSEXEC

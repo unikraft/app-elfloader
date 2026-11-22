@@ -57,6 +57,9 @@
 #endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPATH */
 
 #include "elf_prog.h"
+#if CONFIG_APPELFLOADER_PROCESS_SESSION_TEST
+#include "elf_session.h"
+#endif
 #if CONFIG_APPELFLOADER_PROCESS_VAS
 #include <errno.h>
 #include <sys/wait.h>
@@ -325,6 +328,37 @@ error:
 	uk_pr_err("Cannot start %s (%d)\n", name, rc);
 	return 1;
 }
+
+#if CONFIG_APPELFLOADER_PROCESS_SESSION_TEST
+struct elf_session_args {
+	const char *name;
+	const char *path;
+	void *image;
+	size_t image_len;
+	const char **argv;
+};
+
+static int elf_process_session_run(void *arg)
+{
+	struct elf_session_args *args = arg;
+
+	return elf_process_run(args->name, args->path, args->image,
+			       args->image_len, args->argv);
+}
+
+static int elf_process_entry(const char *name, const char *path, void *image,
+			     size_t image_len, const char *argv[])
+{
+	struct elf_session_args args = {
+		.name = name, .path = path, .image = image,
+		.image_len = image_len, .argv = argv
+	};
+
+	return elf_session_observe(elf_process_session_run, &args);
+}
+#else
+#define elf_process_entry elf_process_run
+#endif
 #endif /* CONFIG_APPELFLOADER_PROCESS_VAS */
 
 int main(int argc, const char *argv[])
@@ -452,11 +486,11 @@ int main(int argc, const char *argv[])
 
 #if CONFIG_APPELFLOADER_PROCESS_VAS
 #if CONFIG_APPELFLOADER_INITRDEXEC
-	ret = elf_process_run(progname, NULL, (void *)img->vbase, img->len,
-			      argv);
+	ret = elf_process_entry(progname, NULL, (void *)img->vbase, img->len,
+				argv);
 #else
-	ret = elf_process_run(progname, realpath ? realpath : path, NULL, 0,
-			      argv);
+	ret = elf_process_entry(progname, realpath ? realpath : path, NULL, 0,
+				argv);
 #endif
 	goto out;
 #endif
