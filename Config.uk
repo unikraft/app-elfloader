@@ -56,6 +56,21 @@ choice
 			Only statically-linked PIE executables are supported.
 endchoice
 
+config APPELFLOADER_PROCESS_VAS
+	bool "Load native applications into a private process address space"
+	depends on APPELFLOADER_VFSEXEC && LIBPOSIX_FUTEX
+	depends on LIBNOLIBC && LIBPOSIX_MMAP && LIBUKPLAT_NATIVE_PAGING
+	depends on LIBUKVMEM_THREAD_VAS && LIBUKPAGING_DIRECTMAP
+	depends on LIBPOSIX_PROCESS_MULTIPROCESS && LIBPOSIX_PROCESS_SIGNAL
+	depends on LIBPOSIX_FDTAB_MULTITAB && LIBPOSIX_FDIO_VMA && !LIBVFSCORE
+	select LIBPOSIX_PROCESS_PREPARE
+	select LIBPOSIX_FUTEX_VAS
+	default n
+	help
+		Prepare an initial process with an owned address space and guarded
+		application stack. The NOLIBC kernel keeps its shared allocator.
+		Images outside the supported process range fail before publication.
+
 config APPELFLOADER_CUSTOMAPPNAME
 	bool "Application name/path via command line"
 	default y if APPELFLOADER_VFSEXEC

@@ -57,6 +57,15 @@
 #endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPATH */
 
 #include "elf_prog.h"
+#if CONFIG_APPELFLOADER_PROCESS_VAS
+#include <errno.h>
+#include <sys/wait.h>
+#include <uk/crash.h>
+#include <uk/process/prepared.h>
+#include <uk/vmem/process.h>
+#include <uk/vmem/vma_types.h>
+#endif
+
 
 #if CONFIG_LIBPOSIX_ENVIRON
 extern const char **environ;
@@ -180,6 +189,165 @@ static __constructor void _libelf_init(void) {
 		UK_CRASH("Failed to initialize libelf: Version error");
 }
 
+#if CONFIG_APPELFLOADER_PROCESS_VAS
+static int elf_process_stack(struct uk_vas *vas, __sz len, __vaddr_t *top)
+{
+	__vaddr_t base;
+	int rc;
+
+	if (!len || len > vas->range_end - vas->range_start -
+	    2 * UK_PAGING_PAGE_SIZE)
+		return -E2BIG;
+	base = vas->range_end - len - 2 * UK_PAGING_PAGE_SIZE;
+	rc = uk_vma_map_anon(vas, &base, len + 2 * UK_PAGING_PAGE_SIZE,
+			     UK_PAGING_PAGE_ATTR_PROT_NONE, 0, "user stack");
+	if (rc)
+		return rc;
+	rc = uk_vma_set_attr(vas, base + UK_PAGING_PAGE_SIZE, len,
+			     UK_PAGING_PAGE_ATTR_PROT_RW, 0);
+	if (!rc)
+		*top = base + UK_PAGING_PAGE_SIZE + len;
+	return rc;
+}
+
+static int elf_process_args(struct elf_prog *prog, const char *name,
+			    const char *argv[], __sz stack_len,
+			    int *argc, int *envc)
+{
+	__sz left, slots, strings;
+	int bytes = elf_arg_env_count(argc, argv, envc, environ, stack_len);
+
+	if (bytes < 0)
+		return bytes;
+	/* Reserve a page for the fixed auxiliary vector, seed and alignment. */
+	if (stack_len < UK_PAGING_PAGE_SIZE ||
+	    (__sz)bytes > stack_len - UK_PAGING_PAGE_SIZE)
+		return -E2BIG;
+	left = stack_len - UK_PAGING_PAGE_SIZE - bytes;
+	slots = (__sz)*argc + (__sz)*envc + 4;
+	if (slots > left / sizeof(uintptr_t))
+		return -E2BIG;
+	left -= slots * sizeof(uintptr_t);
+	strings = (__sz)*argc + (__sz)*envc + strlen(name) + 1 +
+		strlen(prog->path ? prog->path : prog->name) + 1;
+	return strings > left ? -E2BIG : 0;
+}
+
+static int elf_process_run(const char *name, const char *path __unused,
+			   void *image __unused, size_t image_len __unused,
+			   const char *argv[])
+{
+	struct uk_sched *sched = uk_sched_current();
+	struct uk_thread *current = uk_thread_current(), *child = NULL;
+	struct uk_vas *saved = current->vas, *vas = NULL;
+	struct elf_prog *prog = NULL;
+	const __sz stack_len = (__sz)CONFIG_APPELFLOADER_STACK_NBPAGES *
+		UK_PAGING_PAGE_SIZE;
+	__vaddr_t top;
+	__u64 random[2];
+	pid_t pid = -1, waited;
+	bool bound = false;
+	int argc, envc, status, rc;
+#if CONFIG_APPELFLOADER_VFSEXEC_ENVPWD
+	const char *pwd = getenv("PWD");
+#endif
+
+	if (uk_vas_get_active() != uk_vas_get_kernel()) {
+		rc = -EBUSY;
+		goto error;
+	}
+#if CONFIG_APPELFLOADER_VFSEXEC_ENVPWD
+	if (pwd && chdir(pwd)) {
+		rc = -errno;
+		goto error;
+	}
+#endif
+	/* The user stack belongs to the VAS, independently of the container. */
+	child = uk_thread_create_container(sched->a, NULL, 0,
+					   sched->a_auxstack, 0, sched->a_uktls,
+					   false, "elf-application",
+					   NULL, NULL);
+	if (!child) {
+		rc = -ENOMEM;
+		goto error;
+	}
+	pid = uk_posix_process_prepare_spawn(sched->a, child, &vas);
+	if (pid < 0) {
+		rc = pid;
+		goto error;
+	}
+	rc = uk_thread_set_vas(current, vas);
+	if (rc)
+		goto error;
+	bound = true;
+#if CONFIG_APPELFLOADER_INITRDEXEC
+	prog = elf_load_img(uk_alloc_get_default(), image, image_len, name);
+#else
+	prog = elf_load_vfs(uk_alloc_get_default(), path, name);
+#endif
+	if (!prog || PTRISERR(prog)) {
+		rc = prog ? PTR2ERR(prog) : -ENOEXEC;
+		prog = NULL;
+		goto error;
+	}
+	rc = elf_process_args(prog, name, argv, stack_len, &argc, &envc);
+	if (!rc)
+		rc = elf_process_stack(vas, stack_len, &top);
+	if (rc)
+		goto error;
+#if CONFIG_LIBUKRANDOM
+	rc = uk_random_fill_buffer(random, sizeof(random));
+	if (rc)
+		goto error;
+#else
+	random[0] = 0xB0B0;
+	random[1] = 0xF00D;
+#endif
+	child->ctx.sp = top;
+	elf_ctx_init(&child->ctx, prog, name, argc, argv, envc, environ,
+		     random);
+	elf_release_metadata(prog);
+	prog = NULL;
+	if (uk_thread_set_vas(current, saved))
+		UK_CRASH("Cannot restore loader address space\n");
+	bound = false;
+	rc = uk_sched_thread_add(sched, child);
+	if (rc)
+		goto error;
+	rc = uk_posix_process_publish_prepared(child);
+	if (rc) {
+		if (uk_sched_thread_remove(child))
+			UK_CRASH("Cannot withdraw prepared application\n");
+		goto error;
+	}
+	/* Process and thread pins retain the VAS through execution and exec. */
+	uk_vas_put(vas);
+	vas = NULL;
+	uk_thread_wake(child);
+	child = NULL;
+	do {
+		waited = waitpid(pid, &status, 0);
+	} while (waited < 0 && errno == EINTR);
+	if (waited != pid)
+		return 1;
+	if (WIFEXITED(status))
+		return WEXITSTATUS(status);
+	return WIFSIGNALED(status) ? 128 + WTERMSIG(status) : 1;
+error:
+	if (prog)
+		elf_release_metadata(prog);
+	if (bound && uk_thread_set_vas(current, saved))
+		UK_CRASH("Cannot restore failed loader address space\n");
+	if (pid > 0 && uk_posix_process_abort_prepared(child))
+		UK_CRASH("Cannot abort prepared application\n");
+	if (child)
+		uk_thread_release(child);
+	uk_vas_put(vas);
+	uk_pr_err("Cannot start %s (%d)\n", name, rc);
+	return 1;
+}
+#endif /* CONFIG_APPELFLOADER_PROCESS_VAS */
+
 int main(int argc, const char *argv[])
 {
 #if CONFIG_APPELFLOADER_INITRDEXEC
@@ -226,7 +394,8 @@ int main(int argc, const char *argv[])
 	progname      = basename_internal(progname_conv);
 #endif /* CONFIG_APPELFLOADER_VFSEXEC */
 
-#if CONFIG_LIBPOSIX_PROCESS_EXECVE && CONFIG_APPELFLOADER_VFSEXEC
+#if CONFIG_LIBPOSIX_PROCESS_EXECVE && CONFIG_APPELFLOADER_VFSEXEC && \
+	!CONFIG_APPELFLOADER_PROCESS_VAS
 	/* Cut off kernel name (argv[0]) from argument vector */
 	argv = &argv[1];
 	argc -= 1;
@@ -276,7 +445,8 @@ int main(int argc, const char *argv[])
 	}
 #endif /* CONFIG_APPELFLOADER_VFSEXEC_ENVPATH */
 
-#if CONFIG_LIBPOSIX_PROCESS_EXECVE && CONFIG_APPELFLOADER_VFSEXEC
+#if CONFIG_LIBPOSIX_PROCESS_EXECVE && CONFIG_APPELFLOADER_VFSEXEC && \
+	!CONFIG_APPELFLOADER_PROCESS_VAS
 	ret = execve(realpath ? realpath : path,
 		     (char * const *)argv, (char * const *)environ);
 	if (unlikely(ret)) {
@@ -299,6 +469,17 @@ int main(int argc, const char *argv[])
 	uk_pr_info("Image at %p, len %"__PRIsz" bytes\n",
 		   (void *) img->vbase, img->len);
 #endif /* CONFIG_APPELFLOADER_INITRDEXEC */
+
+#if CONFIG_APPELFLOADER_PROCESS_VAS
+#if CONFIG_APPELFLOADER_INITRDEXEC
+	ret = elf_process_run(progname, NULL, (void *)img->vbase, img->len,
+			      argv);
+#else
+	ret = elf_process_run(progname, realpath ? realpath : path, NULL, 0,
+			      argv);
+#endif
+	goto out;
+#endif
 
 	/*
 	 * Create thread container
