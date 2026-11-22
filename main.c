@@ -293,6 +293,9 @@ static int elf_process_run(const char *name, const char *path __unused,
 	if (uk_thread_set_vas(current, saved))
 		UK_CRASH("Cannot restore loader address space\n");
 	bound = false;
+#ifdef UK_POSIX_PROCESS_HAS_PROGRAM_STACK_SIZE
+	uk_posix_process_set_stack_size(child, stack_len);
+#endif /* UK_POSIX_PROCESS_HAS_PROGRAM_STACK_SIZE */
 	rc = uk_sched_thread_add(sched, child);
 	if (rc)
 		goto error;
@@ -591,6 +594,9 @@ int main(int argc, const char *argv[])
 		uk_pr_err("Could not create pthread\n");
 		goto out_free_thread;
 	}
+#ifdef UK_POSIX_PROCESS_HAS_PROGRAM_STACK_SIZE
+	uk_posix_process_set_stack_size(app_thread, stack_size);
+#endif /* UK_POSIX_PROCESS_HAS_PROGRAM_STACK_SIZE */
 #endif /* CONFIG_LIBPOSIX_PROCESS_MULTITHREADING */
 
 	uk_pr_debug("%s: Application stack at %p - %p, pointer: %p\n",
