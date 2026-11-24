@@ -125,6 +125,13 @@ struct elf_prog *elf_load_vfs(struct uk_alloc *a, const char *path,
 void elf_unload(struct elf_prog *elf_prog);
 
 /**
+ * Free the record of a loaded ELF program, and its interpreter's, but leave
+ * their images mapped: for images that something else unmaps (a process's
+ * mappings are released with it), once elf_ctx_init() is done with it.
+ */
+void elf_prog_free(struct elf_prog *elf_prog);
+
+/**
  * Initializes an ukarch_ctx with a loaded ELF program. This program
  * will be executed as soon as the context is scheduled/loaded to
  * the CPU. The function will populate the associated stack with
@@ -151,9 +158,9 @@ void elf_unload(struct elf_prog *elf_prog);
  *   application. The actual c-strings should not be released/modified while
  *   `ctx` and `prog` are in use.
  * @param rand:
- *   Random seed that is passed to the application
- *   Only a reference to rand[] is handed over to the application. Do not
- *   release/modify while `ctx` and `prog` are in use.
+ *   Random seed that is passed to the application (AT_RANDOM)
+ *   The bytes are copied to the application's stack, so rand[] may be
+ *   released once this returns.
  */
 void elf_ctx_init(struct ukarch_ctx *ctx, struct elf_prog *prog,
 		  const char *argv0, int argc, const char *argv[],
